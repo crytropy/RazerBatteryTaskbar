@@ -25,13 +25,13 @@ class TrayController {
         this.tray.setTitle('Razer battery life');
     }
 
-    setBatteryState({ battery }) {
-        if (!Number.isFinite(battery)) {
+    setDeviceState(state) {
+        if (!state?.connected || !Number.isFinite(state.battery)) {
             this.setDisconnected();
             return;
         }
 
-        const normalizedBattery = Math.min(100, Math.max(0, battery));
+        const normalizedBattery = Math.min(100, Math.max(0, state.battery));
         this.tray.setImage(nativeImage.createFromPath(this.getBatteryIconPath(normalizedBattery)));
         this.tray.setToolTip(normalizedBattery.toFixed(1) + '%');
     }
