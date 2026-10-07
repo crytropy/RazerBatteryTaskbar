@@ -88,12 +88,17 @@ class RazerBatteryReader {
             }
 
             return {
-                battery: parseBatteryLevel(reply.data),
+                vendorId: device.vendorId,
                 productId: device.productId,
                 productName: product.name,
+                deviceType: product.type,
+                serialNumber: device.serialNumber || null,
+                battery: parseBatteryLevel(reply.data),
+                charging: null,
             };
         } finally {
             await this.releaseDevice(device, interfaceNumber, interfaceClaimed);
+
             if (this.activeDevice === device) {
                 this.activeDevice = null;
             }
