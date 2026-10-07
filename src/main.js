@@ -1,4 +1,5 @@
 const { app } = require('electron');
+const { DeviceState } = require('./core/device-state');
 const { RazerBatteryReader } = require('./usb/razer-battery-reader');
 const { TrayController } = require('./ui/tray-controller');
 
@@ -12,6 +13,7 @@ let batteryReader;
 let trayController;
 let pollTimer = null;
 let shuttingDown = false;
+let currentState = DeviceState.disconnected();
 
 async function updateBatteryStatus() {
     if (shuttingDown) {
@@ -19,15 +21,17 @@ async function updateBatteryStatus() {
     }
 
     try {
-        const state = await batteryReader.readBattery();
-        trayController.setBatteryState(state);
+        const reading = await batteryReader.readBattery();
+        currentState = DeviceState.connected(reading);
     } catch (error) {
         console.error('[battery] Failed to read battery state:', error);
-        trayController.setDisconnected();
-    } finally {
-        if (!shuttingDown) {
-            pollTimer = setTimeout(updateBatteryStatus, POLL_INTERVAL_MS);
-        }
+        currentState = DeviceState.disconnected(currentState);
+    }
+
+    trayController.setDeviceState(currentState);
+
+    if (!shuttingDown) {
+        pollTimer = setTimeout(updateBatteryStatus, POLL_INTERVAL_MS);
     }
 }
 
@@ -61,5 +65,6 @@ app.whenReady().then(() => {
     });
 
     trayController.initialize();
+    trayController.setDeviceState(currentState);
     updateBatteryStatus();
 });
