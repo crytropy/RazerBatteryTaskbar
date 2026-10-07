@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-windows:
@@ -29,10 +31,47 @@ jobs:
       - name: Build Windows installer
         run: npm run make
 
-      - name: Upload Windows installer
+      - name: Prepare release asset
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path "out/make/squirrel.windows" -Recurse -Filter "*.exe" |
+            Where-Object { $_.Name -like "*Setup*.exe" } |
+            Select-Object -First 1
+
+          if (-not $installer) {
+            throw "Windows installer was not found."
+          }
+
+          Copy-Item $installer.FullName "RazerBatteryTaskbar-Windows-Setup.exe" -Force
+
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: RazerBatteryTaskbar-Windows
-          path: |
-            out/make/squirrel.windows/**/*.exe
+          path: RazerBatteryTaskbar-Windows-Setup.exe
           if-no-files-found: error
+
+      - name: Publish latest development build
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f dev-build "$env:GITHUB_SHA"
+          git push origin refs/tags/dev-build --force
+
+          gh release view dev-build --repo "$env:GITHUB_REPOSITORY" *> $null
+
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload dev-build "RazerBatteryTaskbar-Windows-Setup.exe" --repo "$env:GITHUB_REPOSITORY" --clobber
+          } else {
+            gh release create dev-build "RazerBatteryTaskbar-Windows-Setup.exe" --repo "$env:GITHUB_REPOSITORY" --title "Development Build" --notes "Latest automatic Windows build from the main branch. This build is intended for testing and may change frequently." --prerelease
+          }
+
+      - name: Publish versioned release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" "RazerBatteryTaskbar-Windows-Setup.exe" --repo "$env:GITHUB_REPOSITORY" --title "RazerBatteryTaskbar $env:GITHUB_REF_NAME" --generate-notes
