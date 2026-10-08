@@ -232,14 +232,7 @@ mod tests {
         let mut manager = DeviceManager::new();
 
         manager.update_from_readings(vec![
-            reading(
-                0x00AB,
-                "Mouse",
-                DeviceType::Mouse,
-                "M",
-                Some(80.0),
-                None,
-            ),
+            reading(0x00AB, "Mouse", DeviceType::Mouse, "M", Some(80.0), None),
             reading(
                 0x0555,
                 "Headset",
