@@ -20,7 +20,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 4 | Move supported hardware into a maintainable device database | Complete |
 | 5 | Add multi-device support | Complete |
 | 6 | Add a device event system | Complete |
-| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Hardware validation |
+| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Read-only filtered HID probe complete; hardware validation pending |
 | 8 | Move the stable core to Rust | Core contracts migrated |
 | 9 | Build the lightweight Windows tray frontend | Shell + startup + single-instance compiling |
 | 10 | Add persistent settings | Core/persistence + tray polling/threshold controls + primary preference wiring complete |

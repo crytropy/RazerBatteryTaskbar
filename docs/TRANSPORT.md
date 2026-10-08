@@ -33,3 +33,20 @@ Phase 7 is complete when:
 3. Temporary enumeration failures do not immediately erase state.
 4. Real hardware testing confirms behavior with and without Razer Synapse.
 5. A final transport choice for the Rust core is documented.
+
+
+## Read-only HID discovery probe
+
+The Windows HIDAPI `hid-probe` example is used to determine which HID
+collections Windows exposes with the original Razer drivers and Synapse.
+It supports `--json`, `--known-only`, `--pid 0xNNNN`, and `--help`.
+
+The `--json` report is versioned (schemaVersion 1), sorted by product ID,
+interface, usage page and usage for reproducible comparisons. Its
+`knownProduct` flag is database membership, not a claim that a HID collection
+supports the battery request. It deliberately never opens a HID device
+handle or emits a feature report.
+
+The native transport will only be enabled after identifying usable HID
+collections and checking that active polling does not interfere with Synapse.
+No driver changes are part of this process.

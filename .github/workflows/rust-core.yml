@@ -41,8 +41,8 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      - name: Test Rust workspace
-        run: cargo test --workspace
+      - name: Test Rust workspace (including HID probe)
+        run: cargo test --workspace --all-features --all-targets
 
       - name: Build native tray preview
         run: cargo build -p razer-tray --release
@@ -107,7 +107,21 @@ jobs:
           Read-only diagnostic utility used to enumerate Razer HID collections
           before enabling the real native battery transport.
 
-          It does not modify device state or send the battery protocol request.
+          It does not open HID device handles, modify device state,
+          or send any Razer feature reports.
+
+          Run from PowerShell:
+            .\RazerBatteryTaskbar-HID-Probe.exe
+            .\RazerBatteryTaskbar-HID-Probe.exe --json
+            .\RazerBatteryTaskbar-HID-Probe.exe --pid 0x00AB
+            .\RazerBatteryTaskbar-HID-Probe.exe --known-only
+
+          To save a JSON report:
+            .\RazerBatteryTaskbar-HID-Probe.exe --json | Out-File -Encoding utf8 probe.json
+
+          Reports omit serial numbers, device paths, and internal IDs.
+          The recognized-product flag only means the VID/PID exists in
+          our shared device database, not that battery reads work.
           "@ | Set-Content "dist/hid-probe/README-HID-PROBE.txt" -Encoding utf8
 
       - name: Upload HID enumeration probe

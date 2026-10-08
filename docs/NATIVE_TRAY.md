@@ -66,9 +66,10 @@ Windows toast and startup behavior still require real desktop runtime verificati
 
 ## Next steps
 
-1. Add primary-device selection once real HID devices can be enumerated by the native transport.
-2. Replace `PlaceholderTransport` with the real HID transport after hardware validation.
-3. Package the native tray separately from the Electron compatibility build.
+1. Collect HID Probe reports from real Razer hardware while Synapse is running.
+2. Validate which HID collections support battery requests without changing drivers.
+3. Replace `PlaceholderTransport` with the real HID transport after hardware validation.
+4. Add a primary-device selection menu when real devices are available.
 
 
 ## CI preview artifacts
@@ -86,3 +87,7 @@ The README explicitly states that the real HID battery transport is not enabled 
 `RazerBatteryTaskbar-HID-Probe` contains the read-only hardware enumeration probe, its SHA-256 checksum, and a diagnostic README.
 
 The Electron `Development Build` remains the usable compatibility build until native HID validation is complete.
+
+The HID Probe supports `--json` for structured reports, `--pid 0xNNNN` for a
+specific model, and `--known-only` to filter by the shared product database.
+See [Windows hardware verification](TESTING.md).

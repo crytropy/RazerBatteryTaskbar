@@ -58,7 +58,17 @@ The same Rust workflow produces:
 
 `RazerBatteryTaskbar-HID-Probe`
 
-This is a read-only diagnostic utility used to enumerate Razer HID collections before the native battery transport is enabled. It does not send the Razer battery protocol request.
+This is a read-only diagnostic utility used to enumerate Razer HID collections before the native battery transport is enabled. It does not open device handles or send Razer battery protocol requests.
+
+After extracting the HID Probe artifact ZIP, run it in PowerShell:
+
+```powershell
+.\RazerBatteryTaskbar-HID-Probe.exe
+.\RazerBatteryTaskbar-HID-Probe.exe --json
+.\RazerBatteryTaskbar-HID-Probe.exe --pid 0x00AB
+```
+
+The JSON report excludes serial numbers and HID paths. A known product ID does not imply that its HID battery protocol has been verified. See [docs/TESTING.md](docs/TESTING.md).
 
 ## Architecture
 
