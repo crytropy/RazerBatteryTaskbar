@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod startup;
+
 use std::error::Error;
 use std::thread;
 use std::time::Duration;
@@ -43,6 +45,7 @@ struct TrayApplication {
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
     notifications_item: Option<CheckMenuItem>,
+    start_with_windows_item: Option<CheckMenuItem>,
     refresh_item: Option<MenuItem>,
     quit_item: Option<MenuItem>,
 }
@@ -56,6 +59,7 @@ impl TrayApplication {
             tray: None,
             status_item: None,
             notifications_item: None,
+            start_with_windows_item: None,
             refresh_item: None,
             quit_item: None,
         }
@@ -71,11 +75,19 @@ impl TrayApplication {
             self.settings.notifications.enabled,
             None,
         );
+        let start_with_windows_item = CheckMenuItem::with_id(
+            "start-with-windows",
+            "Start with Windows",
+            true,
+            self.settings.start_with_windows,
+            None,
+        );
         let refresh_item = MenuItem::with_id("refresh", "Refresh", true, None);
         let quit_item = MenuItem::with_id("quit", "Quit", true, None);
 
         menu.append(&status_item)?;
         menu.append(&notifications_item)?;
+        menu.append(&start_with_windows_item)?;
         menu.append(&refresh_item)?;
         menu.append(&quit_item)?;
 
@@ -88,6 +100,7 @@ impl TrayApplication {
         self.tray = Some(tray);
         self.status_item = Some(status_item);
         self.notifications_item = Some(notifications_item);
+        self.start_with_windows_item = Some(start_with_windows_item);
         self.refresh_item = Some(refresh_item);
         self.quit_item = Some(quit_item);
 
@@ -126,6 +139,14 @@ impl TrayApplication {
         }
     }
 
+    fn persist_settings(&self, context: &str) {
+        if let Some(store) = &self.settings_store
+            && let Err(error) = store.save(&self.settings)
+        {
+            eprintln!("failed to persist {context}: {error}");
+        }
+    }
+
     fn toggle_notifications(&mut self) {
         self.settings.notifications.enabled = !self.settings.notifications.enabled;
 
@@ -133,10 +154,29 @@ impl TrayApplication {
             item.set_checked(self.settings.notifications.enabled);
         }
 
-        if let Some(store) = &self.settings_store
-            && let Err(error) = store.save(&self.settings)
-        {
-            eprintln!("failed to persist notification setting: {error}");
+        self.persist_settings("notification setting");
+    }
+
+    fn toggle_start_with_windows(&mut self) {
+        let next = !self.settings.start_with_windows;
+
+        match startup::set_enabled(next) {
+            Ok(()) => {
+                self.settings.start_with_windows = next;
+
+                if let Some(item) = &self.start_with_windows_item {
+                    item.set_checked(next);
+                }
+
+                self.persist_settings("start-with-Windows setting");
+            }
+            Err(error) => {
+                eprintln!("failed to update start-with-Windows registration: {error}");
+
+                if let Some(item) = &self.start_with_windows_item {
+                    item.set_checked(self.settings.start_with_windows);
+                }
+            }
         }
     }
 
@@ -147,6 +187,15 @@ impl TrayApplication {
             .is_some_and(|item| event.id == *item.id())
         {
             self.toggle_notifications();
+            return;
+        }
+
+        if self
+            .start_with_windows_item
+            .as_ref()
+            .is_some_and(|item| event.id == *item.id())
+        {
+            self.toggle_start_with_windows();
             return;
         }
 
@@ -208,6 +257,27 @@ fn load_settings() -> (Option<SettingsStore>, AppSettings) {
         Err(error) => {
             eprintln!("failed to load settings; using defaults: {error}");
             (Some(store), AppSettings::default())
+        }
+    }
+}
+
+fn reconcile_startup_setting(
+    store: Option<&SettingsStore>,
+    settings: &mut AppSettings,
+) {
+    match startup::is_enabled() {
+        Ok(enabled) if enabled != settings.start_with_windows => {
+            settings.start_with_windows = enabled;
+
+            if let Some(store) = store
+                && let Err(error) = store.save(settings)
+            {
+                eprintln!("failed to reconcile start-with-Windows setting: {error}");
+            }
+        }
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!("failed to read start-with-Windows registration: {error}");
         }
     }
 }
@@ -284,7 +354,8 @@ fn build_battery_icon(battery: Option<f32>) -> Result<Icon, tray_icon::BadIcon> 
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let (settings_store, settings) = load_settings();
+    let (settings_store, mut settings) = load_settings();
+    reconcile_startup_setting(settings_store.as_ref(), &mut settings);
     let poll_interval = Duration::from_secs(settings.poll_interval_seconds);
 
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
