@@ -12,6 +12,7 @@ pub enum StartupError {
     Io(io::Error),
     Registry(String),
     CommandTooLong(usize),
+    #[cfg(not(windows))]
     UnsupportedPlatform,
 }
 
@@ -24,6 +25,7 @@ impl Display for StartupError {
                 formatter,
                 "startup command is {length} UTF-16 characters; Windows Run entries support at most {MAX_RUN_COMMAND_CHARS}"
             ),
+            #[cfg(not(windows))]
             Self::UnsupportedPlatform => {
                 formatter.write_str("start-with-Windows is only available on Windows")
             }
@@ -35,7 +37,9 @@ impl Error for StartupError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Io(error) => Some(error),
-            Self::Registry(_) | Self::CommandTooLong(_) | Self::UnsupportedPlatform => None,
+            Self::Registry(_) | Self::CommandTooLong(_) => None,
+            #[cfg(not(windows))]
+            Self::UnsupportedPlatform => None,
         }
     }
 }
