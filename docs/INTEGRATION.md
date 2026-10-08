@@ -48,6 +48,27 @@ Consumers must check `schemaVersion`.
 
 Fields may be added compatibly within a schema version. A breaking rename, semantic change, or field removal requires a new schema version.
 
+## Loopback HTTP transport
+
+The native tray serves the current snapshot at:
+
+`http://127.0.0.1:27212/v1/status`
+
+Properties:
+
+- bound to IPv4 loopback only;
+- GET-only;
+- read-only;
+- `Content-Type: application/json; charset=UTF-8`;
+- `Cache-Control: no-store`;
+- no settings mutation;
+- no HID commands;
+- no serial numbers or internal IDs.
+
+Unknown paths return 404 and non-GET methods return 405. If the port cannot be bound, the tray continues running and only the optional integration endpoint is unavailable.
+
+The endpoint is intended for local consumers such as Seelen Fancy Toolbar `remoteData`, a CLI, or another local adapter.
+
 ## Intended transports
 
 The contract does not mandate how it is transported. It can be used by:
@@ -58,4 +79,4 @@ The contract does not mandate how it is transported. It can be used by:
 - a Seelen UI adapter;
 - future integrations.
 
-The first planned transport is a read-only loopback endpoint because Seelen Fancy Toolbar supports periodically fetching external JSON through `remoteData`.
+The first transport is the read-only loopback HTTP endpoint above. Named pipes remain an option for future privileged or command-oriented integrations, but are unnecessary for the current read-only status contract.

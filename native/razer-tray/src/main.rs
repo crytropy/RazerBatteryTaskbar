@@ -1,11 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod api;
 mod startup;
 
 use std::error::Error;
 use std::thread;
 use std::time::Duration;
 
+use api::SharedIntegrationState;
 use notify_rust::{Notification, Urgency};
 use razer_core::frontend::FrontendSnapshot;
 use razer_core::notifications::{NotificationKind, NotificationRequest, evaluate_events};
@@ -45,6 +47,7 @@ struct TrayApplication {
     core: CoreService<PlaceholderTransport>,
     settings_store: Option<SettingsStore>,
     settings: AppSettings,
+    integration_state: SharedIntegrationState,
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
     notifications_item: Option<CheckMenuItem>,
@@ -54,11 +57,16 @@ struct TrayApplication {
 }
 
 impl TrayApplication {
-    fn new(settings_store: Option<SettingsStore>, settings: AppSettings) -> Self {
+    fn new(
+        settings_store: Option<SettingsStore>,
+        settings: AppSettings,
+        integration_state: SharedIntegrationState,
+    ) -> Self {
         Self {
             core: CoreService::new(PlaceholderTransport),
             settings_store,
             settings,
+            integration_state,
             tray: None,
             status_item: None,
             notifications_item: None,
@@ -113,6 +121,7 @@ impl TrayApplication {
     fn refresh(&mut self) {
         let result = self.core.refresh();
         let snapshot = self.core.frontend_snapshot();
+        api::update_state(&self.integration_state, &snapshot);
 
         for notification in evaluate_events(&result.events, &self.settings.notifications) {
             deliver_notification(&notification);
@@ -364,6 +373,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     reconcile_startup_setting(settings_store.as_ref(), &mut settings);
     let poll_interval = Duration::from_secs(settings.poll_interval_seconds);
 
+    let integration_state = api::initial_state();
+    let _api_thread = match api::start(integration_state.clone()) {
+        Ok(thread) => Some(thread),
+        Err(error) => {
+            eprintln!(
+                "integration API unavailable on http://{}{}: {error}",
+                api::API_ADDRESS,
+                api::STATUS_PATH
+            );
+            None
+        }
+    };
+
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
 
     let menu_proxy = event_loop.create_proxy();
@@ -382,7 +404,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    let mut application = TrayApplication::new(settings_store, settings);
+    let mut application =
+        TrayApplication::new(settings_store, settings, integration_state);
     event_loop.run_app(&mut application)?;
     drop(instance_guard);
 
