@@ -43,10 +43,7 @@ fn battery_notification_kind(
     None
 }
 
-fn create_request(
-    kind: NotificationKind,
-    device: &DeviceState,
-) -> NotificationRequest {
+fn create_request(kind: NotificationKind, device: &DeviceState) -> NotificationRequest {
     let name = device.name.as_deref().unwrap_or("Razer device");
     let battery = device.battery.unwrap_or_default();
 
