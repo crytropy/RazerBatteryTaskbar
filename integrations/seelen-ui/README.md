@@ -42,8 +42,9 @@ The plugin polls the local read-only endpoint every 5 seconds.
 - Charging: `83% ⚡`
 - Battery unavailable: `Razer ?%`
 - Service/device unavailable: `Razer --`
+- Native HID transport not ready: `Razer --` with an explicit tooltip explaining that HID is pending
 
-The tooltip lists all connected Razer devices and their battery state.
+The tooltip lists all connected Razer devices and their battery state. It distinguishes a transport that is not ready from a ready transport that simply has no supported devices connected.
 
 ## Current limitation
 

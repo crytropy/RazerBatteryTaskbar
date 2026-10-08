@@ -110,6 +110,8 @@ impl<T: BatteryTransport> CoreService<T> {
                 .selected_primary_device()
                 .as_ref()
                 .map(FrontendDeviceState::from),
+            transport_name: self.transport.name().to_string(),
+            transport_ready: self.transport.is_ready(),
             transport_healthy: self.consecutive_transport_failures == 0,
             consecutive_transport_failures: self.consecutive_transport_failures,
         }
@@ -119,6 +121,7 @@ impl<T: BatteryTransport> CoreService<T> {
         DiagnosticsSnapshot {
             core_version: env!("CARGO_PKG_VERSION"),
             transport_name: self.transport.name().to_string(),
+            transport_ready: self.transport.is_ready(),
             consecutive_transport_failures: self.consecutive_transport_failures,
             last_transport_error: self.last_transport_error.clone(),
             devices: self.manager.devices(),
@@ -338,6 +341,8 @@ mod tests {
 
         let snapshot = service.frontend_snapshot();
 
+        assert_eq!(snapshot.transport_name, "scripted");
+        assert!(snapshot.transport_ready);
         assert!(snapshot.transport_healthy);
         assert_eq!(snapshot.devices.len(), 1);
         assert_eq!(

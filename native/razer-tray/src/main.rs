@@ -41,6 +41,10 @@ impl BatteryTransport for PlaceholderTransport {
         "placeholder"
     }
 
+    fn is_ready(&self) -> bool {
+        false
+    }
+
     fn read_devices(&mut self) -> Result<Vec<DeviceReading>, TransportError> {
         Ok(Vec::new())
     }
@@ -376,6 +380,10 @@ fn deliver_test_notification() {
 }
 
 fn format_status(snapshot: &FrontendSnapshot) -> String {
+    if !snapshot.transport_ready {
+        return "Native shell ready — HID transport pending".to_string();
+    }
+
     match snapshot.primary_device.as_ref() {
         Some(device) if device.connected => match device.battery {
             Some(battery) => format!(
@@ -387,7 +395,7 @@ fn format_status(snapshot: &FrontendSnapshot) -> String {
                 device.name.as_deref().unwrap_or("Razer device")
             ),
         },
-        _ => "Native shell ready — HID transport pending".to_string(),
+        _ => "No supported Razer devices detected".to_string(),
     }
 }
 
@@ -483,6 +491,8 @@ mod tests {
         let snapshot = FrontendSnapshot {
             devices: Vec::new(),
             primary_device: None,
+            transport_name: "placeholder".to_string(),
+            transport_ready: false,
             transport_healthy: true,
             consecutive_transport_failures: 0,
         };

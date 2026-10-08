@@ -25,7 +25,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 9 | Build the lightweight Windows tray frontend | Shell + startup + single-instance compiling |
 | 10 | Add persistent settings | Core/persistence + tray polling/threshold controls + primary preference wiring complete |
 | 11 | Add low/critical battery notifications | Policy + Windows adapter + manual test action complete; runtime verification pending |
-| 12 | Add an optional integration API/IPC boundary | Read-only loopback API implemented |
+| 12 | Add an optional integration API/IPC boundary | Read-only loopback API + explicit transport readiness implemented |
 | 13 | Add optional Seelen UI integration | Fancy Toolbar adapter scaffold complete |
 | 14 | Add automated tests and CI | Rust quality gates + labeled preview artifacts complete |
 | 15 | Package and release a stable v1.0 of the rewritten application | Planned |

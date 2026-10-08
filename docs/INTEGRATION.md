@@ -13,6 +13,8 @@ Example:
   "schemaVersion": 1,
   "service": "RazerBatteryTaskbar",
   "coreVersion": "0.1.0",
+  "transportName": "windows-hid",
+  "transportReady": true,
   "transportHealthy": true,
   "consecutiveTransportFailures": 0,
   "primaryDevice": {
@@ -29,6 +31,12 @@ Example:
 ```
 
 The device list uses the same fields as `primaryDevice`.
+
+`transportReady` and `transportHealthy` are intentionally separate:
+
+- `transportReady=false` means the selected battery transport is not available/implemented for use yet;
+- `transportReady=true, transportHealthy=false` means a real transport exists but recent device reads are failing;
+- `transportName` identifies the active transport implementation without exposing HID paths or other private hardware identifiers.
 
 ## Privacy boundary
 

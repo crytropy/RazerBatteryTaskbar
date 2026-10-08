@@ -4,6 +4,7 @@ use crate::state::DeviceState;
 pub struct DiagnosticsSnapshot {
     pub core_version: &'static str,
     pub transport_name: String,
+    pub transport_ready: bool,
     pub consecutive_transport_failures: u32,
     pub last_transport_error: Option<String>,
     pub devices: Vec<DeviceState>,
@@ -16,6 +17,10 @@ impl DiagnosticsSnapshot {
             "RazerBattery core diagnostics".to_string(),
             format!("Core version: {}", self.core_version),
             format!("Transport: {}", self.transport_name),
+            format!(
+                "Transport ready: {}",
+                if self.transport_ready { "yes" } else { "no" }
+            ),
             format!(
                 "Consecutive transport failures: {}",
                 self.consecutive_transport_failures
@@ -82,6 +87,7 @@ mod tests {
         let snapshot = DiagnosticsSnapshot {
             core_version: "0.1.0",
             transport_name: "fake".to_string(),
+            transport_ready: true,
             consecutive_transport_failures: 0,
             last_transport_error: None,
             devices: vec![device.clone()],
@@ -91,6 +97,7 @@ mod tests {
         let text = snapshot.to_privacy_safe_text();
 
         assert!(text.contains("Razer Basilisk V3 Pro Wireless"));
+        assert!(text.contains("Transport ready: yes"));
         assert!(text.contains("VID:1532 PID:00AB"));
         assert!(text.contains("battery=83.2%"));
         assert!(!text.contains("SECRET-SERIAL"));

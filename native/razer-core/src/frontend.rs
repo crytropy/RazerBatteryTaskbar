@@ -29,6 +29,8 @@ impl From<&DeviceState> for FrontendDeviceState {
 pub struct FrontendSnapshot {
     pub devices: Vec<FrontendDeviceState>,
     pub primary_device: Option<FrontendDeviceState>,
+    pub transport_name: String,
+    pub transport_ready: bool,
     pub transport_healthy: bool,
     pub consecutive_transport_failures: u32,
 }

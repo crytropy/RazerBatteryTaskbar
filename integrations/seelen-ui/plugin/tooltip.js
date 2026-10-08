@@ -2,6 +2,10 @@ if (!status || status.schemaVersion !== 1) {
   return "RazerBatteryTaskbar is unavailable or uses an unsupported API version.";
 }
 
+if (status.transportReady === false) {
+  return "Native Razer HID transport is not ready yet.";
+}
+
 const devices = Array.isArray(status.devices)
   ? status.devices.filter((device) => device.connected)
   : [];

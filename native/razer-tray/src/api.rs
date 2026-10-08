@@ -16,6 +16,8 @@ pub fn initial_state() -> SharedIntegrationState {
     let snapshot = FrontendSnapshot {
         devices: Vec::new(),
         primary_device: None,
+        transport_name: "placeholder".to_string(),
+        transport_ready: false,
         transport_healthy: true,
         consecutive_transport_failures: 0,
     };
@@ -131,6 +133,8 @@ mod tests {
         let json = state.read().unwrap();
 
         assert!(json.contains(r#""schemaVersion":1"#));
+        assert!(json.contains(r#""transportName":"placeholder""#));
+        assert!(json.contains(r#""transportReady":false"#));
         assert!(json.contains(r#""devices":[]"#));
     }
 
@@ -148,6 +152,8 @@ mod tests {
                 connected: true,
             }],
             primary_device: None,
+            transport_name: "scripted".to_string(),
+            transport_ready: true,
             transport_healthy: true,
             consecutive_transport_failures: 0,
         };

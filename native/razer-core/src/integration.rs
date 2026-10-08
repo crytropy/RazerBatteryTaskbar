@@ -37,6 +37,8 @@ pub struct IntegrationSnapshot {
     pub schema_version: u32,
     pub service: &'static str,
     pub core_version: &'static str,
+    pub transport_name: String,
+    pub transport_ready: bool,
     pub transport_healthy: bool,
     pub consecutive_transport_failures: u32,
     pub primary_device: Option<IntegrationDevice>,
@@ -49,6 +51,8 @@ impl IntegrationSnapshot {
             schema_version: INTEGRATION_SCHEMA_VERSION,
             service: INTEGRATION_SERVICE_NAME,
             core_version: env!("CARGO_PKG_VERSION"),
+            transport_name: snapshot.transport_name.clone(),
+            transport_ready: snapshot.transport_ready,
             transport_healthy: snapshot.transport_healthy,
             consecutive_transport_failures: snapshot.consecutive_transport_failures,
             primary_device: snapshot
@@ -89,6 +93,8 @@ mod tests {
         let snapshot = FrontendSnapshot {
             devices: vec![device.clone()],
             primary_device: Some(device),
+            transport_name: "scripted".to_string(),
+            transport_ready: true,
             transport_healthy: true,
             consecutive_transport_failures: 0,
         };
@@ -99,6 +105,8 @@ mod tests {
 
         assert!(json.contains(r#""schemaVersion":1"#));
         assert!(json.contains(r#""service":"RazerBatteryTaskbar""#));
+        assert!(json.contains(r#""transportName":"scripted""#));
+        assert!(json.contains(r#""transportReady":true"#));
         assert!(json.contains(r#""deviceType":"mouse""#));
         assert!(json.contains(r#""productId":171"#));
         assert!(!json.contains("serial"));

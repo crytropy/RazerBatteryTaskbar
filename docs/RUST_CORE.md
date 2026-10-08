@@ -25,6 +25,8 @@ UI/integration code should consume `CoreService::frontend_snapshot()` rather tha
 
 `CoreService<T: BatteryTransport>` owns the transport and device manager. A frontend only needs to request a refresh and consume snapshots/events.
 
+Transport readiness and transport health are separate concepts. `BatteryTransport::is_ready()` reports whether a real battery transport is available for use, while health tracks recent read failures. The Native Preview placeholder therefore reports `ready=false` without pretending that an implemented HID transport failed.
+
 Transport-wide failures preserve the last connected state for the first two failures. On the third consecutive failure, known connected devices transition to disconnected. A later successful scan resets the transport health counter.
 
 ## Compatibility rule
