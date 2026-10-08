@@ -45,6 +45,14 @@ class WebUsbTransport extends EventEmitter {
         return this.webUsb.getDevices();
     }
 
+    getStatus() {
+        return Object.freeze({
+            name: 'node-usb WebUSB',
+            hotplugWatching: this.watching,
+            hotplugDebounceMs: this.hotplugDebounceMs,
+        });
+    }
+
     startWatching() {
         if (this.watching) {
             return;

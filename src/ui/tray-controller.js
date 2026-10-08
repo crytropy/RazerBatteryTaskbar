@@ -2,6 +2,7 @@ const path = require('path');
 const {
     Menu,
     Tray,
+    clipboard,
     nativeImage,
 } = require('electron');
 
@@ -20,9 +21,15 @@ function formatDeviceLabel(device) {
 }
 
 class TrayController {
-    constructor({ rootPath, onRefresh, onQuit }) {
+    constructor({
+        rootPath,
+        onRefresh,
+        onCopyDiagnostics,
+        onQuit,
+    }) {
         this.rootPath = rootPath;
         this.onRefresh = onRefresh;
+        this.onCopyDiagnostics = onCopyDiagnostics;
         this.onQuit = onQuit;
         this.tray = null;
     }
@@ -65,6 +72,18 @@ class TrayController {
         );
     }
 
+    copyDiagnostics() {
+        if (typeof this.onCopyDiagnostics !== 'function') {
+            return;
+        }
+
+        const diagnostics = this.onCopyDiagnostics();
+
+        if (typeof diagnostics === 'string' && diagnostics.length > 0) {
+            clipboard.writeText(diagnostics);
+        }
+    }
+
     buildContextMenu(devices) {
         const deviceItems = devices.length > 0
             ? devices.map(device => ({
@@ -80,6 +99,7 @@ class TrayController {
             ...deviceItems,
             { type: 'separator' },
             { label: 'Refresh', type: 'normal', click: this.onRefresh },
+            { label: 'Copy diagnostics', type: 'normal', click: () => this.copyDiagnostics() },
             { type: 'separator' },
             { label: 'Quit', type: 'normal', click: this.onQuit },
         ]);

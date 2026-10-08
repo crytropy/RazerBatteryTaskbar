@@ -2,6 +2,7 @@ const {
     app,
     powerMonitor,
 } = require('electron');
+const { buildDiagnostics } = require('./core/diagnostics');
 const { DEVICE_EVENTS } = require('./core/device-events');
 const { DeviceManager } = require('./core/device-manager');
 const { TRANSPORT_EVENTS } = require('./transport/transport-events');
@@ -28,12 +29,30 @@ let pollInProgress = false;
 let refreshPending = false;
 let shuttingDown = false;
 let enumerationFailureCount = 0;
+let lastScanAt = null;
+let lastScanError = null;
 
 function renderDeviceStates() {
     trayController.setDevices(
         deviceManager.getDevices(),
         deviceManager.getPrimaryDevice(),
     );
+}
+
+function getDiagnostics() {
+    return buildDiagnostics({
+        appVersion: app.getVersion(),
+        platform: process.platform,
+        arch: process.arch,
+        electronVersion: process.versions.electron,
+        nodeVersion: process.versions.node,
+        transportStatus: transport?.getStatus(),
+        devices: deviceManager?.getDevices() ?? [],
+        primaryDevice: deviceManager?.getPrimaryDevice() ?? null,
+        lastScanAt,
+        lastScanError,
+        enumerationFailureCount,
+    });
 }
 
 function clearPollTimer() {
@@ -81,9 +100,13 @@ async function refreshDeviceStates() {
     try {
         const readings = await batteryReader.readAllBatteries();
         enumerationFailureCount = 0;
+        lastScanError = null;
+        lastScanAt = new Date().toISOString();
         deviceManager.updateFromReadings(readings);
     } catch (error) {
         enumerationFailureCount += 1;
+        lastScanAt = new Date().toISOString();
+        lastScanError = error?.message || String(error);
         nextDelay = RETRY_INTERVAL_MS;
 
         console.error(
@@ -153,6 +176,7 @@ app.whenReady().then(() => {
     trayController = new TrayController({
         rootPath: app.getAppPath(),
         onRefresh: requestImmediateRefresh,
+        onCopyDiagnostics: getDiagnostics,
         onQuit: quitApplication,
     });
 
