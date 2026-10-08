@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use razer_core::settings::AppSettings;
-use tray_icon::menu::{CheckMenuItem, MenuEvent, Submenu};
+use tray_icon::menu::{CheckMenuItem, MenuEvent, MenuItem, Submenu};
 
 const POLL_INTERVAL_OPTIONS: &[(u64, &str)] = &[
     (5, "5 seconds"),
@@ -24,6 +24,7 @@ const CRITICAL_BATTERY_OPTIONS: &[(u8, &str)] = &[(5, "5%"), (10, "10%"), (15, "
 pub struct SettingsMenu {
     pub root: Submenu,
     notifications_item: CheckMenuItem,
+    test_notification_item: MenuItem,
     start_with_windows_item: CheckMenuItem,
     poll_interval_items: Vec<(u64, CheckMenuItem)>,
     low_battery_items: Vec<(u8, CheckMenuItem)>,
@@ -42,6 +43,10 @@ impl SettingsMenu {
             None,
         );
         root.append(&notifications_item)?;
+
+        let test_notification_item =
+            MenuItem::with_id("settings.test-notification", "Send test notification", true, None);
+        root.append(&test_notification_item)?;
 
         let low_battery_menu =
             Submenu::with_id("settings.low-battery", "Low battery threshold", true);
@@ -112,6 +117,7 @@ impl SettingsMenu {
         let menu = Self {
             root,
             notifications_item,
+            test_notification_item,
             start_with_windows_item,
             poll_interval_items,
             low_battery_items,
@@ -124,6 +130,10 @@ impl SettingsMenu {
 
     pub fn is_notifications_event(&self, event: &MenuEvent) -> bool {
         event.id == *self.notifications_item.id()
+    }
+
+    pub fn is_test_notification_event(&self, event: &MenuEvent) -> bool {
+        event.id == *self.test_notification_item.id()
     }
 
     pub fn is_start_with_windows_event(&self, event: &MenuEvent) -> bool {

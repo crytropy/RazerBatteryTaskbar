@@ -28,6 +28,7 @@ It does not parse Razer packets, enumerate HID collections, or know device seria
 The Settings submenu contains:
 
 - Notifications;
+- Send test notification;
 - Low battery threshold;
 - Critical battery threshold;
 - Polling interval;
@@ -58,6 +59,8 @@ The native tray holds a named process mutex for its lifetime. If another copy is
 The Rust core decides when a low or critical battery notification should exist. The tray only translates the resulting `NotificationRequest` into a desktop notification.
 
 Low battery uses normal urgency. Critical battery uses critical urgency. The notification toggle is stored in the same per-user JSON settings file as the other application settings.
+
+`Send test notification` bypasses the battery policy and notification-enabled setting on purpose. It sends one normal Windows notification so toast behavior can be verified without a real HID battery reading or waiting for a low-battery threshold.
 
 Windows toast and startup behavior still require real desktop runtime verification; CI verifies compilation and unit tests without changing the runner's startup registration.
 

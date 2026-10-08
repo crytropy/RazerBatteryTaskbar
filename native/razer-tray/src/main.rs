@@ -223,6 +223,15 @@ impl TrayApplication {
             return;
         }
 
+        let test_notification_event = self
+            .settings_menu
+            .as_ref()
+            .is_some_and(|menu| menu.is_test_notification_event(&event));
+        if test_notification_event {
+            deliver_test_notification();
+            return;
+        }
+
         let start_with_windows_event = self
             .settings_menu
             .as_ref()
@@ -352,6 +361,17 @@ fn deliver_notification(request: &NotificationRequest) {
         .show()
     {
         eprintln!("failed to show Windows battery notification: {error}");
+    }
+}
+
+fn deliver_test_notification() {
+    if let Err(error) = Notification::new()
+        .summary("RazerBatteryTaskbar")
+        .body("Native Windows notification test.")
+        .urgency(Urgency::Normal)
+        .show()
+    {
+        eprintln!("failed to show Windows test notification: {error}");
     }
 }
 
