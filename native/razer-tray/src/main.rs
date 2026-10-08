@@ -261,10 +261,7 @@ fn load_settings() -> (Option<SettingsStore>, AppSettings) {
     }
 }
 
-fn reconcile_startup_setting(
-    store: Option<&SettingsStore>,
-    settings: &mut AppSettings,
-) {
+fn reconcile_startup_setting(store: Option<&SettingsStore>, settings: &mut AppSettings) {
     match startup::is_enabled() {
         Ok(enabled) if enabled != settings.start_with_windows => {
             settings.start_with_windows = enabled;

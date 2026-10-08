@@ -113,10 +113,7 @@ mod tests {
             build_startup_command(Path::new(r"C:\Program Files\RazerBattery\razer-tray.exe"))
                 .unwrap();
 
-        assert_eq!(
-            command,
-            r#""C:\Program Files\RazerBattery\razer-tray.exe""#
-        );
+        assert_eq!(command, r#""C:\Program Files\RazerBattery\razer-tray.exe""#);
     }
 
     #[test]
