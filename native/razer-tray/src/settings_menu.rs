@@ -44,8 +44,12 @@ impl SettingsMenu {
         );
         root.append(&notifications_item)?;
 
-        let test_notification_item =
-            MenuItem::with_id("settings.test-notification", "Send test notification", true, None);
+        let test_notification_item = MenuItem::with_id(
+            "settings.test-notification",
+            "Send test notification",
+            true,
+            None,
+        );
         root.append(&test_notification_item)?;
 
         let low_battery_menu =
