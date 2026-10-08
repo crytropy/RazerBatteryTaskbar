@@ -176,8 +176,10 @@ mod tests {
     #[test]
     fn all_polling_options_are_valid_core_settings() {
         for (seconds, _) in POLL_INTERVAL_OPTIONS {
-            let mut settings = AppSettings::default();
-            settings.poll_interval_seconds = *seconds;
+            let settings = AppSettings {
+                poll_interval_seconds: *seconds,
+                ..AppSettings::default()
+            };
             settings.validate().unwrap();
         }
     }
