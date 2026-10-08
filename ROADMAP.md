@@ -22,9 +22,9 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 6 | Add a device event system | Complete |
 | 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Hardware validation |
 | 8 | Move the stable core to Rust | Core contracts migrated |
-| 9 | Build the lightweight Windows tray frontend | Planned |
-| 10 | Add persistent settings | Planned |
-| 11 | Add low/critical battery notifications | Planned |
+| 9 | Build the lightweight Windows tray frontend | Next |
+| 10 | Add persistent settings | Core/persistence complete |
+| 11 | Add low/critical battery notifications | Policy complete; OS delivery pending |
 | 12 | Add an optional integration API/IPC boundary | Planned |
 | 13 | Add optional Seelen UI integration | Planned |
 | 14 | Add automated tests and CI | In progress |
@@ -34,34 +34,16 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 
 The Electron application remains the usable compatibility runtime while the Rust core is developed in parallel.
 
-JavaScript compatibility stack:
+Rust core now contains protocol handling, the shared device database, normalized state, multi-device management, events, transport abstraction, the core service, privacy-safe frontend snapshots, persistent settings, and notification policy.
 
-- `src/core/device-state.js` owns normalized per-device application state.
-- `src/core/device-manager.js` owns the known-device collection and state transitions.
-- `src/core/device-events.js` defines the UI-independent event contract.
-- `src/transport/webusb-transport.js` isolates WebUSB enumeration and hotplug monitoring.
-- `src/usb/razer-battery-reader.js` performs the current Razer control transfers.
-- `src/ui/tray-controller.js` renders normalized state only.
-- `src/main.js` coordinates lifecycle, refresh scheduling, diagnostics, and Windows resume handling.
-
-Rust migration stack:
-
-- `native/razer-core/src/protocol.rs` mirrors the Razer battery protocol.
-- `native/razer-core/src/device_db.rs` consumes the same JSON device database as JavaScript.
-- `native/razer-core/src/state.rs` provides normalized readings and device states.
-- `native/razer-core/src/manager.rs` provides multi-device state management and primary-device selection.
-- `native/razer-core/src/events.rs` provides the core event contract.
-- `native/razer-core/src/transport.rs` defines the UI-independent battery transport boundary.
-- A Windows HID enumeration probe is built with the `hidapi` Windows-native backend.
+The remaining hardware-dependent Rust work is the real Windows HID battery transport. The remaining user-facing native work begins with the Windows tray frontend.
 
 ## Phase 7 hardware validation
 
-The compatibility runtime now has debounced USB attach/detach refreshes, fast retry after transient enumeration failures, delayed refresh after Windows resume, and privacy-safe diagnostics.
-
 Real hardware validation remains necessary for Synapse coexistence and HID collection selection. See `docs/TESTING.md` and `docs/TRANSPORT.md`.
 
-## Phase 8 status
+## Phase 9 direction
 
-The stable non-hardware-dependent core contracts have now been migrated to Rust. The remaining Phase 8 blocker is the real Windows HID battery transport, which depends on the Phase 7 hardware probe result.
+The native Windows tray will consume only the frontend-safe snapshot and core events. It will own Windows-specific concerns such as the Win32 event loop, tray icon/menu, toast delivery, autostart registration, and settings UI.
 
 Seelen UI remains an optional integration and must not become a dependency of the Rust core.

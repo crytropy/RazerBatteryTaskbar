@@ -10,6 +10,7 @@ default = []
 windows-hid = ["dep:hidapi"]
 
 [dependencies]
+directories = "6.0.0"
 hidapi = { version = "2.6.7", optional = true, default-features = false, features = ["windows-native"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
