@@ -55,12 +55,22 @@ pub fn start(
 
 fn respond(request: Request, state: &SharedIntegrationState) {
     if request.method() != &Method::Get {
-        send_response(request, StatusCode(405), "Method Not Allowed", "text/plain; charset=UTF-8");
+        send_response(
+            request,
+            StatusCode(405),
+            "Method Not Allowed",
+            "text/plain; charset=UTF-8",
+        );
         return;
     }
 
     if request.url() != STATUS_PATH {
-        send_response(request, StatusCode(404), "Not Found", "text/plain; charset=UTF-8");
+        send_response(
+            request,
+            StatusCode(404),
+            "Not Found",
+            "text/plain; charset=UTF-8",
+        );
         return;
     }
 

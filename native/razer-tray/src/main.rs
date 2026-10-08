@@ -404,8 +404,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    let mut application =
-        TrayApplication::new(settings_store, settings, integration_state);
+    let mut application = TrayApplication::new(settings_store, settings, integration_state);
     event_loop.run_app(&mut application)?;
     drop(instance_guard);
 
