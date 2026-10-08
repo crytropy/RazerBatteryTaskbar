@@ -25,6 +25,7 @@ impl Display for TransportError {
 impl Error for TransportError {}
 
 pub trait BatteryTransport {
+    fn name(&self) -> &'static str;
     fn read_devices(&mut self) -> Result<Vec<DeviceReading>, TransportError>;
 }
 
@@ -35,6 +36,10 @@ mod tests {
     struct EmptyTransport;
 
     impl BatteryTransport for EmptyTransport {
+        fn name(&self) -> &'static str {
+            "empty-test"
+        }
+
         fn read_devices(&mut self) -> Result<Vec<DeviceReading>, TransportError> {
             Ok(Vec::new())
         }
@@ -43,6 +48,7 @@ mod tests {
     #[test]
     fn transport_contract_is_ui_independent() {
         let mut transport = EmptyTransport;
+        assert_eq!(transport.name(), "empty-test");
         assert!(transport.read_devices().unwrap().is_empty());
     }
 }

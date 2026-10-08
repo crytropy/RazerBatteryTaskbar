@@ -10,6 +10,16 @@ The Rust migration now mirrors the stable JavaScript core contracts while remain
 - `events` — UI-independent device state transition events.
 - `manager` — multi-device tracking, deterministic ordering, primary-device selection, and event generation.
 - `transport` — the transport trait that future HIDAPI/native Windows implementations must satisfy.
+- `service` — the single core entry point for refreshes, transport health, failure policy, and state snapshots.
+- `diagnostics` — privacy-safe core diagnostics that intentionally omit serial numbers and internal device IDs.
+
+## CoreService behavior
+
+`CoreService<T: BatteryTransport>` owns the transport and device manager. A frontend only needs to request a refresh and consume the resulting snapshot/events.
+
+Transport-wide failures preserve the last connected state for the first two failures. On the third consecutive failure, known connected devices transition to disconnected. A later successful scan resets the transport health counter.
+
+This mirrors the compatibility runtime's current recovery policy while moving the policy out of the UI/application shell.
 
 ## Compatibility rule
 
@@ -21,6 +31,7 @@ The Rust core intentionally preserves the behavior already established by the Ja
 4. Primary-device selection prefers a connected device with readable battery state.
 5. Device ordering is Mouse → Headset → Dock → Dongle → Unknown.
 6. The device database has one source of truth: `src/devices/razer-products.json`.
+7. Three consecutive transport-wide failures are required before existing device state is disconnected.
 
 ## Remaining hardware-dependent work
 
