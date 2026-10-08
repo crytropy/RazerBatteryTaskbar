@@ -1,33 +1,27 @@
-# Rust core migration
+# Rust core architecture
 
-Phase 8 starts as a parallel, UI-independent core. The existing Electron application remains the usable compatibility implementation while Rust components are proven independently.
+The Rust migration now mirrors the stable JavaScript core contracts while remaining independent from Electron and Seelen UI.
 
-## Initial Rust scope
+## Modules
 
-The first Rust crate contains:
+- `protocol` — Razer 90-byte request/response protocol.
+- `device_db` — loads the existing shared `src/devices/razer-products.json` database at compile time.
+- `state` — normalized `DeviceReading`, `DeviceState`, device IDs, and battery normalization.
+- `events` — UI-independent device state transition events.
+- `manager` — multi-device tracking, deterministic ordering, primary-device selection, and event generation.
+- `transport` — the transport trait that future HIDAPI/native Windows implementations must satisfy.
 
-- The 90-byte Razer report format.
-- XOR CRC generation.
-- Battery request construction.
-- Battery response parsing.
-- A Windows-only HID enumeration probe.
+## Compatibility rule
 
-The HID probe is intentionally read-only at this stage. It enumerates HID collections for vendor ID `0x1532` and prints PID, interface number, usage page, usage, and product string. It does not send feature reports and does not print device serial numbers.
+The Rust core intentionally preserves the behavior already established by the JavaScript compatibility implementation:
 
-## Why HID is being evaluated
+1. Missing devices are retained as disconnected states.
+2. Battery and charging changes produce distinct events.
+3. One aggregate `DevicesChanged` event follows a batch containing meaningful changes.
+4. Primary-device selection prefers a connected device with readable battery state.
+5. Device ordering is Mouse → Headset → Dock → Dongle → Unknown.
+6. The device database has one source of truth: `src/devices/razer-products.json`.
 
-The current Electron compatibility transport uses node-usb/libusb. The long-term Windows transport should preserve the normal Windows/Razer driver stack and avoid asking users to replace device drivers.
+## Remaining hardware-dependent work
 
-The Rust `hidapi` crate provides a Windows-native backend and feature-report APIs. The probe exists to establish which Razer HID collection/interface should be used before battery reads are implemented.
-
-## Migration rule
-
-Rust must preserve the external contracts already established in JavaScript:
-
-- normalized device state;
-- multi-device management;
-- connection/battery/charging events;
-- transport isolation;
-- UI independence.
-
-No Seelen-specific code belongs in the Rust core.
+The only major core dependency still blocked on physical hardware validation is the real Windows HID battery transport. The existing HID probe remains read-only until the correct HID collection/interface is confirmed on supported hardware with Razer Synapse running.

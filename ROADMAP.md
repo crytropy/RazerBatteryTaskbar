@@ -21,7 +21,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 5 | Add multi-device support | Complete |
 | 6 | Add a device event system | Complete |
 | 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Hardware validation |
-| 8 | Move the stable core to Rust | In progress |
+| 8 | Move the stable core to Rust | Core contracts migrated |
 | 9 | Build the lightweight Windows tray frontend | Planned |
 | 10 | Add persistent settings | Planned |
 | 11 | Add low/critical battery notifications | Planned |
@@ -46,10 +46,13 @@ JavaScript compatibility stack:
 
 Rust migration stack:
 
-- `native/razer-core` contains the first UI-independent Rust protocol implementation.
-- Rust tests verify the 90-byte battery request, CRC, and battery parser.
+- `native/razer-core/src/protocol.rs` mirrors the Razer battery protocol.
+- `native/razer-core/src/device_db.rs` consumes the same JSON device database as JavaScript.
+- `native/razer-core/src/state.rs` provides normalized readings and device states.
+- `native/razer-core/src/manager.rs` provides multi-device state management and primary-device selection.
+- `native/razer-core/src/events.rs` provides the core event contract.
+- `native/razer-core/src/transport.rs` defines the UI-independent battery transport boundary.
 - A Windows HID enumeration probe is built with the `hidapi` Windows-native backend.
-- The probe does not send feature reports and does not expose serial numbers.
 
 ## Phase 7 hardware validation
 
@@ -57,6 +60,8 @@ The compatibility runtime now has debounced USB attach/detach refreshes, fast re
 
 Real hardware validation remains necessary for Synapse coexistence and HID collection selection. See `docs/TESTING.md` and `docs/TRANSPORT.md`.
 
-## Phase 8 migration rule
+## Phase 8 status
 
-Rust must preserve the already-established device-state, event, multi-device, and transport boundaries. Seelen UI remains an optional integration and must not become a dependency of the Rust core.
+The stable non-hardware-dependent core contracts have now been migrated to Rust. The remaining Phase 8 blocker is the real Windows HID battery transport, which depends on the Phase 7 hardware probe result.
+
+Seelen UI remains an optional integration and must not become a dependency of the Rust core.
