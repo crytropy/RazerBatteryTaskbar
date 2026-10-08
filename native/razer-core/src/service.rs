@@ -225,10 +225,8 @@ mod tests {
 
     #[test]
     fn configured_primary_device_preference_is_used_across_snapshots_and_events() {
-        let transport = ScriptedTransport::new(vec![Ok(vec![
-            mouse_reading(80.0),
-            headset_reading(55.0),
-        ])]);
+        let transport =
+            ScriptedTransport::new(vec![Ok(vec![mouse_reading(80.0), headset_reading(55.0)])]);
         let mut service = CoreService::new(transport);
         service.set_primary_device_preference(PrimaryDevicePreference::ProductId(0x0555));
 
