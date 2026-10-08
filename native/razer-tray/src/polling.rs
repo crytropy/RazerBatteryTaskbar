@@ -57,10 +57,6 @@ mod tests {
         });
 
         assert!(scheduler.set_interval(Duration::from_millis(1)));
-        assert!(
-            tick_receiver
-                .recv_timeout(Duration::from_secs(1))
-                .is_ok()
-        );
+        assert!(tick_receiver.recv_timeout(Duration::from_secs(1)).is_ok());
     }
 }

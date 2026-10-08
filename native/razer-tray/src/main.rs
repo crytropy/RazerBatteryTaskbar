@@ -443,12 +443,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         tick_proxy.send_event(UserEvent::Tick).is_ok()
     });
 
-    let mut application = TrayApplication::new(
-        settings_store,
-        settings,
-        integration_state,
-        poll_scheduler,
-    );
+    let mut application =
+        TrayApplication::new(settings_store, settings, integration_state, poll_scheduler);
     event_loop.run_app(&mut application)?;
     drop(instance_guard);
 

@@ -19,8 +19,7 @@ const LOW_BATTERY_OPTIONS: &[(u8, &str)] = &[
     (30, "30%"),
 ];
 
-const CRITICAL_BATTERY_OPTIONS: &[(u8, &str)] =
-    &[(5, "5%"), (10, "10%"), (15, "15%"), (20, "20%")];
+const CRITICAL_BATTERY_OPTIONS: &[(u8, &str)] = &[(5, "5%"), (10, "10%"), (15, "15%"), (20, "20%")];
 
 pub struct SettingsMenu {
     pub root: Submenu,
@@ -62,8 +61,11 @@ impl SettingsMenu {
             .collect::<Result<Vec<_>, tray_icon::menu::Error>>()?;
         root.append(&low_battery_menu)?;
 
-        let critical_battery_menu =
-            Submenu::with_id("settings.critical-battery", "Critical battery threshold", true);
+        let critical_battery_menu = Submenu::with_id(
+            "settings.critical-battery",
+            "Critical battery threshold",
+            true,
+        );
         let critical_battery_items = CRITICAL_BATTERY_OPTIONS
             .iter()
             .map(|(percent, label)| {
