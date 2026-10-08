@@ -4,13 +4,16 @@ use std::error::Error;
 use std::thread;
 use std::time::Duration;
 
+use notify_rust::{Notification, Urgency};
 use razer_core::frontend::FrontendSnapshot;
-use razer_core::notifications::evaluate_events;
+use razer_core::notifications::{
+    NotificationKind, NotificationRequest, evaluate_events,
+};
 use razer_core::service::CoreService;
 use razer_core::settings::{AppSettings, SettingsStore};
 use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
-use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -37,20 +40,24 @@ impl BatteryTransport for PlaceholderTransport {
 
 struct TrayApplication {
     core: CoreService<PlaceholderTransport>,
+    settings_store: Option<SettingsStore>,
     settings: AppSettings,
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
+    notifications_item: Option<CheckMenuItem>,
     refresh_item: Option<MenuItem>,
     quit_item: Option<MenuItem>,
 }
 
 impl TrayApplication {
-    fn new(settings: AppSettings) -> Self {
+    fn new(settings_store: Option<SettingsStore>, settings: AppSettings) -> Self {
         Self {
             core: CoreService::new(PlaceholderTransport),
+            settings_store,
             settings,
             tray: None,
             status_item: None,
+            notifications_item: None,
             refresh_item: None,
             quit_item: None,
         }
@@ -59,10 +66,18 @@ impl TrayApplication {
     fn create_tray(&mut self) -> Result<(), Box<dyn Error>> {
         let menu = Menu::new();
         let status_item = MenuItem::new("Starting native core…", false, None);
+        let notifications_item = CheckMenuItem::with_id(
+            "notifications",
+            "Notifications",
+            true,
+            self.settings.notifications.enabled,
+            None,
+        );
         let refresh_item = MenuItem::with_id("refresh", "Refresh", true, None);
         let quit_item = MenuItem::with_id("quit", "Quit", true, None);
 
         menu.append(&status_item)?;
+        menu.append(&notifications_item)?;
         menu.append(&refresh_item)?;
         menu.append(&quit_item)?;
 
@@ -74,6 +89,7 @@ impl TrayApplication {
 
         self.tray = Some(tray);
         self.status_item = Some(status_item);
+        self.notifications_item = Some(notifications_item);
         self.refresh_item = Some(refresh_item);
         self.quit_item = Some(quit_item);
 
@@ -85,10 +101,7 @@ impl TrayApplication {
         let snapshot = self.core.frontend_snapshot();
 
         for notification in evaluate_events(&result.events, &self.settings.notifications) {
-            eprintln!(
-                "notification pending: {} — {}",
-                notification.title, notification.body
-            );
+            deliver_notification(&notification);
         }
 
         self.render(&snapshot);
@@ -115,7 +128,30 @@ impl TrayApplication {
         }
     }
 
+    fn toggle_notifications(&mut self) {
+        self.settings.notifications.enabled = !self.settings.notifications.enabled;
+
+        if let Some(item) = &self.notifications_item {
+            item.set_checked(self.settings.notifications.enabled);
+        }
+
+        if let Some(store) = &self.settings_store
+            && let Err(error) = store.save(&self.settings)
+        {
+            eprintln!("failed to persist notification setting: {error}");
+        }
+    }
+
     fn handle_menu(&mut self, event_loop: &ActiveEventLoop, event: MenuEvent) {
+        if self
+            .notifications_item
+            .as_ref()
+            .is_some_and(|item| event.id == *item.id())
+        {
+            self.toggle_notifications();
+            return;
+        }
+
         if self
             .refresh_item
             .as_ref()
@@ -160,13 +196,37 @@ impl ApplicationHandler<UserEvent> for TrayApplication {
     }
 }
 
-fn load_settings() -> AppSettings {
-    match SettingsStore::for_current_user().and_then(|store| store.load()) {
-        Ok(settings) => settings,
+fn load_settings() -> (Option<SettingsStore>, AppSettings) {
+    let store = match SettingsStore::for_current_user() {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("settings persistence unavailable; using defaults: {error}");
+            return (None, AppSettings::default());
+        }
+    };
+
+    match store.load() {
+        Ok(settings) => (Some(store), settings),
         Err(error) => {
             eprintln!("failed to load settings; using defaults: {error}");
-            AppSettings::default()
+            (Some(store), AppSettings::default())
         }
+    }
+}
+
+fn deliver_notification(request: &NotificationRequest) {
+    let urgency = match request.kind {
+        NotificationKind::LowBattery => Urgency::Normal,
+        NotificationKind::CriticalBattery => Urgency::Critical,
+    };
+
+    if let Err(error) = Notification::new()
+        .summary(&request.title)
+        .body(&request.body)
+        .urgency(urgency)
+        .show()
+    {
+        eprintln!("failed to show Windows battery notification: {error}");
     }
 }
 
@@ -226,7 +286,7 @@ fn build_battery_icon(battery: Option<f32>) -> Result<Icon, tray_icon::BadIcon> 
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let settings = load_settings();
+    let (settings_store, settings) = load_settings();
     let poll_interval = Duration::from_secs(settings.poll_interval_seconds);
 
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
@@ -247,7 +307,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    let mut application = TrayApplication::new(settings);
+    let mut application = TrayApplication::new(settings_store, settings);
     event_loop.run_app(&mut application)?;
 
     Ok(())
