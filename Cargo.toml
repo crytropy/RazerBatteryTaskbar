@@ -1,3 +1,6 @@
 [workspace]
-members = ["native/razer-core"]
+members = [
+    "native/razer-core",
+    "native/razer-tray",
+]
 resolver = "2"

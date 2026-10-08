@@ -22,7 +22,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 6 | Add a device event system | Complete |
 | 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Hardware validation |
 | 8 | Move the stable core to Rust | Core contracts migrated |
-| 9 | Build the lightweight Windows tray frontend | Next |
+| 9 | Build the lightweight Windows tray frontend | Shell compiling |
 | 10 | Add persistent settings | Core/persistence complete |
 | 11 | Add low/critical battery notifications | Policy complete; OS delivery pending |
 | 12 | Add an optional integration API/IPC boundary | Planned |
@@ -32,18 +32,18 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 
 ## Current architecture
 
-The Electron application remains the usable compatibility runtime while the Rust core is developed in parallel.
+The Electron application remains the usable compatibility runtime while the Rust/native implementation is developed in parallel.
 
-Rust core now contains protocol handling, the shared device database, normalized state, multi-device management, events, transport abstraction, the core service, privacy-safe frontend snapshots, persistent settings, and notification policy.
+The Rust core contains protocol handling, the shared device database, normalized state, multi-device management, events, transport abstraction, the core service, privacy-safe frontend snapshots, persistent settings, and notification policy.
 
-The remaining hardware-dependent Rust work is the real Windows HID battery transport. The remaining user-facing native work begins with the Windows tray frontend.
+The native tray shell now lives in `native/razer-tray`. It has its own Windows event loop, system tray icon/menu, refresh scheduling, and settings loading, but deliberately uses a placeholder transport until HID hardware validation is complete.
 
 ## Phase 7 hardware validation
 
 Real hardware validation remains necessary for Synapse coexistence and HID collection selection. See `docs/TESTING.md` and `docs/TRANSPORT.md`.
 
-## Phase 9 direction
+## Native migration rule
 
-The native Windows tray will consume only the frontend-safe snapshot and core events. It will own Windows-specific concerns such as the Win32 event loop, tray icon/menu, toast delivery, autostart registration, and settings UI.
+The native tray consumes only frontend-safe snapshots and core notification requests. It must not parse Razer protocol data or directly depend on Seelen UI.
 
-Seelen UI remains an optional integration and must not become a dependency of the Rust core.
+Seelen UI remains an optional integration and must not become a dependency of the Rust core or native tray.

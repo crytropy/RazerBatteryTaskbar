@@ -1,0 +1,11 @@
+[package]
+name = "razer-tray"
+version = "0.1.0"
+edition = "2024"
+license = "ISC"
+description = "Native Windows tray frontend for RazerBatteryTaskbar"
+
+[dependencies]
+razer-core = { path = "../razer-core" }
+tray-icon = "0.26.1"
+winit = "0.30.13"

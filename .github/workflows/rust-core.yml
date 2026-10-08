@@ -40,8 +40,18 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      - name: Test Rust core
+      - name: Test Rust workspace
         run: cargo test --workspace
+
+      - name: Build native tray shell
+        run: cargo build -p razer-tray --release
+
+      - name: Upload native tray shell
+        uses: actions/upload-artifact@v4
+        with:
+          name: RazerBattery-Native-Tray-Shell
+          path: target/release/razer-tray.exe
+          if-no-files-found: error
 
       - name: Build HID enumeration probe
         run: cargo build -p razer-core --example hid-probe --features windows-hid --release
