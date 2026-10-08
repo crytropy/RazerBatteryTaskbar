@@ -13,12 +13,15 @@ use razer_core::service::CoreService;
 use razer_core::settings::{AppSettings, SettingsStore};
 use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
+use single_instance::SingleInstance;
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::WindowId;
+
+const INSTANCE_NAME: &str = "RazerBatteryTaskbar.Native.Tray";
 
 #[derive(Debug)]
 enum UserEvent {
@@ -351,6 +354,12 @@ fn build_battery_icon(battery: Option<f32>) -> Result<Icon, tray_icon::BadIcon> 
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let instance_guard = SingleInstance::new(INSTANCE_NAME)?;
+
+    if !instance_guard.is_single() {
+        return Ok(());
+    }
+
     let (settings_store, mut settings) = load_settings();
     reconcile_startup_setting(settings_store.as_ref(), &mut settings);
     let poll_interval = Duration::from_secs(settings.poll_interval_seconds);
@@ -375,6 +384,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut application = TrayApplication::new(settings_store, settings);
     event_loop.run_app(&mut application)?;
+    drop(instance_guard);
 
     Ok(())
 }

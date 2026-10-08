@@ -17,6 +17,7 @@ The native tray owns Windows/UI concerns only:
 - Windows desktop notification delivery through notify-rust;
 - persistent Notifications on/off toggle;
 - per-user Start with Windows registration;
+- single-instance protection;
 - Refresh and Quit actions.
 
 It does not parse Razer packets, enumerate HID collections, or know device serial numbers.
@@ -33,6 +34,10 @@ The registry is treated as the source of truth on startup. If it differs from `s
 
 The command is rejected if it exceeds the documented 260-character Run-entry limit.
 
+## Single-instance behavior
+
+The native tray holds a named process mutex for its lifetime. If another copy is launched manually or by an overlapping startup action, the secondary process exits immediately instead of creating a second tray icon or a second polling loop.
+
 ## Notification delivery
 
 The Rust core decides when a low or critical battery notification should exist. The tray only translates the resulting `NotificationRequest` into a desktop notification.
@@ -44,6 +49,5 @@ Windows toast and startup behavior still require real desktop runtime verificati
 ## Next steps
 
 1. Add settings UI/menu actions for thresholds, polling, and primary device.
-2. Add single-instance protection for the native tray.
-3. Replace `PlaceholderTransport` with the real HID transport after hardware validation.
-4. Package the native tray separately from the Electron compatibility build.
+2. Replace `PlaceholderTransport` with the real HID transport after hardware validation.
+3. Package the native tray separately from the Electron compatibility build.
