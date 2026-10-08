@@ -1,4 +1,4 @@
-name: Rust Core
+name: Rust Native Preview
 
 on:
   push:
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rust-core-${{ github.ref }}
+  group: rust-native-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -43,22 +43,75 @@ jobs:
       - name: Test Rust workspace
         run: cargo test --workspace
 
-      - name: Build native tray shell
+      - name: Build native tray preview
         run: cargo build -p razer-tray --release
 
-      - name: Upload native tray shell
+      - name: Prepare native preview artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "dist/native-preview" -Force | Out-Null
+
+          $exe = "dist/native-preview/RazerBatteryTaskbar-Native-Preview.exe"
+          Copy-Item "target/release/razer-tray.exe" $exe -Force
+
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  RazerBatteryTaskbar-Native-Preview.exe" |
+            Set-Content "dist/native-preview/SHA256SUMS.txt" -Encoding ascii
+
+          @"
+          RazerBatteryTaskbar Native Preview
+
+          Commit: $env:GITHUB_SHA
+
+          This is a preview of the Rust/native Windows tray frontend.
+          The tray, settings, notifications, startup registration, single-instance
+          protection, and read-only local integration API are implemented.
+
+          IMPORTANT:
+          The real Razer HID battery transport is not enabled yet. This preview
+          intentionally uses the placeholder transport until physical-device HID
+          validation is complete, so it will not report real battery values yet.
+
+          Integration endpoint:
+          http://127.0.0.1:27212/v1/status
+          "@ | Set-Content "dist/native-preview/README-NATIVE-PREVIEW.txt" -Encoding utf8
+
+      - name: Upload native preview
         uses: actions/upload-artifact@v4
         with:
-          name: RazerBattery-Native-Tray-Shell
-          path: target/release/razer-tray.exe
+          name: RazerBatteryTaskbar-Native-Preview
+          path: dist/native-preview/*
           if-no-files-found: error
 
       - name: Build HID enumeration probe
         run: cargo build -p razer-core --example hid-probe --features windows-hid --release
 
+      - name: Prepare HID probe artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "dist/hid-probe" -Force | Out-Null
+
+          $exe = "dist/hid-probe/RazerBatteryTaskbar-HID-Probe.exe"
+          Copy-Item "target/release/examples/hid-probe.exe" $exe -Force
+
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  RazerBatteryTaskbar-HID-Probe.exe" |
+            Set-Content "dist/hid-probe/SHA256SUMS.txt" -Encoding ascii
+
+          @"
+          RazerBatteryTaskbar HID Probe
+
+          Commit: $env:GITHUB_SHA
+
+          Read-only diagnostic utility used to enumerate Razer HID collections
+          before enabling the real native battery transport.
+
+          It does not modify device state or send the battery protocol request.
+          "@ | Set-Content "dist/hid-probe/README-HID-PROBE.txt" -Encoding utf8
+
       - name: Upload HID enumeration probe
         uses: actions/upload-artifact@v4
         with:
-          name: RazerBattery-HID-Probe
-          path: target/release/examples/hid-probe.exe
+          name: RazerBatteryTaskbar-HID-Probe
+          path: dist/hid-probe/*
           if-no-files-found: error
