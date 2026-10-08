@@ -132,6 +132,21 @@ impl DeviceManager {
             .or_else(|| connected.first().cloned())
     }
 
+    pub fn primary_device_for_product_id(&self, product_id: u16) -> Option<DeviceState> {
+        let connected = self.connected_devices();
+
+        connected
+            .iter()
+            .find(|device| device.product_id == product_id && device.battery.is_some())
+            .cloned()
+            .or_else(|| {
+                connected
+                    .iter()
+                    .find(|device| device.product_id == product_id)
+                    .cloned()
+            })
+    }
+
     pub fn clear(&mut self) {
         self.devices.clear();
     }
@@ -210,6 +225,40 @@ mod tests {
 
         assert_eq!(manager.connected_devices().len(), 2);
         assert_eq!(manager.primary_device().unwrap().battery, Some(55.0));
+    }
+
+    #[test]
+    fn selects_a_requested_product_before_the_automatic_primary_device() {
+        let mut manager = DeviceManager::new();
+
+        manager.update_from_readings(vec![
+            reading(
+                0x00AB,
+                "Mouse",
+                DeviceType::Mouse,
+                "M",
+                Some(80.0),
+                None,
+            ),
+            reading(
+                0x0555,
+                "Headset",
+                DeviceType::Headset,
+                "H",
+                Some(60.0),
+                None,
+            ),
+        ]);
+
+        assert_eq!(manager.primary_device().unwrap().product_id, 0x00AB);
+        assert_eq!(
+            manager
+                .primary_device_for_product_id(0x0555)
+                .unwrap()
+                .product_id,
+            0x0555
+        );
+        assert!(manager.primary_device_for_product_id(0x9999).is_none());
     }
 
     #[test]

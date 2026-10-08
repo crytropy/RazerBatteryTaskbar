@@ -66,8 +66,11 @@ impl TrayApplication {
         integration_state: SharedIntegrationState,
         poll_scheduler: PollScheduler,
     ) -> Self {
+        let mut core = CoreService::new(PlaceholderTransport);
+        core.set_primary_device_preference(settings.primary_device.clone());
+
         Self {
-            core: CoreService::new(PlaceholderTransport),
+            core,
             settings_store,
             settings,
             integration_state,

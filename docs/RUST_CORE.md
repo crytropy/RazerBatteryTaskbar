@@ -34,7 +34,7 @@ The Rust core intentionally preserves the behavior already established by the Ja
 1. Missing devices are retained as disconnected states.
 2. Battery and charging changes produce distinct events.
 3. One aggregate `DevicesChanged` event follows a batch containing meaningful changes.
-4. Primary-device selection prefers a connected device with readable battery state.
+4. Primary-device selection prefers a connected device with readable battery state. A configured product-ID preference overrides automatic selection while that product is connected, with automatic fallback when it is unavailable.
 5. Device ordering is Mouse → Headset → Dock → Dongle → Unknown.
 6. The device database has one source of truth: `src/devices/razer-products.json`.
 7. Three consecutive transport-wide failures are required before existing device state is disconnected.

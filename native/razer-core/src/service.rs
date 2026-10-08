@@ -2,6 +2,7 @@ use crate::diagnostics::DiagnosticsSnapshot;
 use crate::events::DeviceEvent;
 use crate::frontend::{FrontendDeviceState, FrontendSnapshot};
 use crate::manager::DeviceManager;
+use crate::settings::PrimaryDevicePreference;
 use crate::state::DeviceState;
 use crate::transport::BatteryTransport;
 
@@ -20,6 +21,7 @@ pub struct CoreService<T: BatteryTransport> {
     transport: T,
     manager: DeviceManager,
     failure_threshold: u32,
+    primary_device_preference: PrimaryDevicePreference,
     consecutive_transport_failures: u32,
     last_transport_error: Option<String>,
 }
@@ -39,6 +41,7 @@ impl<T: BatteryTransport> CoreService<T> {
             transport,
             manager: DeviceManager::new(),
             failure_threshold,
+            primary_device_preference: PrimaryDevicePreference::Auto,
             consecutive_transport_failures: 0,
             last_transport_error: None,
         }
@@ -66,10 +69,14 @@ impl<T: BatteryTransport> CoreService<T> {
             }
         };
 
+        let mut events = events;
+        self.apply_primary_preference_to_events(&mut events);
+        let primary_device = self.selected_primary_device();
+
         RefreshSnapshot {
             events,
             devices: self.manager.devices(),
-            primary_device: self.manager.primary_device(),
+            primary_device,
             transport_error,
             consecutive_transport_failures: self.consecutive_transport_failures,
         }
@@ -80,7 +87,15 @@ impl<T: BatteryTransport> CoreService<T> {
     }
 
     pub fn primary_device(&self) -> Option<DeviceState> {
-        self.manager.primary_device()
+        self.selected_primary_device()
+    }
+
+    pub fn primary_device_preference(&self) -> &PrimaryDevicePreference {
+        &self.primary_device_preference
+    }
+
+    pub fn set_primary_device_preference(&mut self, preference: PrimaryDevicePreference) {
+        self.primary_device_preference = preference;
     }
 
     pub fn frontend_snapshot(&self) -> FrontendSnapshot {
@@ -92,8 +107,7 @@ impl<T: BatteryTransport> CoreService<T> {
                 .map(FrontendDeviceState::from)
                 .collect(),
             primary_device: self
-                .manager
-                .primary_device()
+                .selected_primary_device()
                 .as_ref()
                 .map(FrontendDeviceState::from),
             transport_healthy: self.consecutive_transport_failures == 0,
@@ -108,7 +122,27 @@ impl<T: BatteryTransport> CoreService<T> {
             consecutive_transport_failures: self.consecutive_transport_failures,
             last_transport_error: self.last_transport_error.clone(),
             devices: self.manager.devices(),
-            primary_device: self.manager.primary_device(),
+            primary_device: self.selected_primary_device(),
+        }
+    }
+
+    fn selected_primary_device(&self) -> Option<DeviceState> {
+        match self.primary_device_preference {
+            PrimaryDevicePreference::Auto => self.manager.primary_device(),
+            PrimaryDevicePreference::ProductId(product_id) => self
+                .manager
+                .primary_device_for_product_id(product_id)
+                .or_else(|| self.manager.primary_device()),
+        }
+    }
+
+    fn apply_primary_preference_to_events(&self, events: &mut [DeviceEvent]) {
+        let selected = self.selected_primary_device();
+
+        for event in events {
+            if let DeviceEvent::DevicesChanged { primary_device, .. } = event {
+                *primary_device = selected.clone();
+            }
         }
     }
 
@@ -164,6 +198,18 @@ mod tests {
         }
     }
 
+    fn headset_reading(battery: f32) -> DeviceReading {
+        DeviceReading {
+            vendor_id: 0x1532,
+            product_id: 0x0555,
+            product_name: Some("Razer BlackShark V2 Pro".to_string()),
+            device_type: DeviceType::Headset,
+            battery: Some(battery),
+            charging: None,
+            serial_number: Some("HEADSET-1".to_string()),
+        }
+    }
+
     #[test]
     fn successful_refresh_updates_the_manager_and_resets_transport_health() {
         let transport = ScriptedTransport::new(vec![Ok(vec![mouse_reading(80.0)])]);
@@ -175,6 +221,52 @@ mod tests {
         assert_eq!(refresh.devices.len(), 1);
         assert_eq!(refresh.primary_device.unwrap().battery, Some(80.0));
         assert!(matches!(refresh.events[0], DeviceEvent::Connected { .. }));
+    }
+
+    #[test]
+    fn configured_primary_device_preference_is_used_across_snapshots_and_events() {
+        let transport = ScriptedTransport::new(vec![Ok(vec![
+            mouse_reading(80.0),
+            headset_reading(55.0),
+        ])]);
+        let mut service = CoreService::new(transport);
+        service.set_primary_device_preference(PrimaryDevicePreference::ProductId(0x0555));
+
+        let refresh = service.refresh();
+
+        assert_eq!(refresh.primary_device.as_ref().unwrap().product_id, 0x0555);
+        assert_eq!(service.primary_device().unwrap().product_id, 0x0555);
+        assert_eq!(
+            service
+                .frontend_snapshot()
+                .primary_device
+                .as_ref()
+                .unwrap()
+                .product_id,
+            0x0555
+        );
+
+        let event_primary = refresh
+            .events
+            .iter()
+            .find_map(|event| match event {
+                DeviceEvent::DevicesChanged { primary_device, .. } => primary_device.as_ref(),
+                _ => None,
+            })
+            .unwrap();
+
+        assert_eq!(event_primary.product_id, 0x0555);
+    }
+
+    #[test]
+    fn unavailable_primary_device_preference_falls_back_to_automatic_selection() {
+        let transport = ScriptedTransport::new(vec![Ok(vec![mouse_reading(80.0)])]);
+        let mut service = CoreService::new(transport);
+        service.set_primary_device_preference(PrimaryDevicePreference::ProductId(0x0555));
+
+        service.refresh();
+
+        assert_eq!(service.primary_device().unwrap().product_id, 0x00AB);
     }
 
     #[test]
