@@ -25,7 +25,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 9 | Build the lightweight Windows tray frontend | Shell + startup + single-instance compiling |
 | 10 | Add persistent settings | Core/persistence + tray toggles complete |
 | 11 | Add low/critical battery notifications | Windows adapter compiling; runtime verification pending |
-| 12 | Add an optional integration API/IPC boundary | Planned |
+| 12 | Add an optional integration API/IPC boundary | Versioned JSON contract complete; transport next |
 | 13 | Add optional Seelen UI integration | Planned |
 | 14 | Add automated tests and CI | In progress |
 | 15 | Package and release a stable v1.0 of the rewritten application | Planned |
@@ -34,7 +34,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 
 The Electron application remains the usable compatibility runtime while the Rust/native implementation is developed in parallel.
 
-The Rust core contains protocol handling, the shared device database, normalized state, multi-device management, events, transport abstraction, the core service, privacy-safe frontend snapshots, persistent settings, and notification policy.
+The Rust core contains protocol handling, the shared device database, normalized state, multi-device management, events, transport abstraction, the core service, privacy-safe frontend snapshots, a versioned integration JSON contract, persistent settings, and notification policy.
 
 The native tray shell lives in `native/razer-tray`. It owns the Windows event loop, system tray icon/menu, refresh scheduling, settings persistence integration, Windows notification adapter, per-user startup registration, and single-instance protection, but deliberately uses a placeholder transport until HID hardware validation is complete.
 

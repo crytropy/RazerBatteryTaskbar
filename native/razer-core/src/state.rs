@@ -29,6 +29,16 @@ impl DeviceType {
             Self::Unknown => 4,
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mouse => "mouse",
+            Self::Headset => "headset",
+            Self::Dock => "dock",
+            Self::Dongle => "dongle",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

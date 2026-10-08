@@ -12,7 +12,8 @@ The Rust migration now mirrors the stable JavaScript core contracts while remain
 - `transport` — the transport trait that future HIDAPI/native Windows implementations must satisfy.
 - `service` — the single core entry point for refreshes, transport health, failure policy, and state snapshots.
 - `diagnostics` — privacy-safe core diagnostics.
-- `frontend` — serial-free state objects intended for Windows Tray, Seelen UI, and future local API consumers.
+- `frontend` — serial-free state objects intended for Windows Tray and integration consumers.
+- `integration` — versioned JSON contract for optional local API, Seelen, CLI, and future adapters.
 
 ## Frontend privacy boundary
 
