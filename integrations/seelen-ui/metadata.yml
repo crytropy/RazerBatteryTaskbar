@@ -1,0 +1,28 @@
+id: "@crytropy/razer-battery"
+
+metadata:
+  displayName:
+    en: Razer Battery
+    zh-TW: Razer 電量
+  description:
+    en: Shows Razer device battery state from the local RazerBatteryTaskbar service.
+    zh-TW: 從本機 RazerBatteryTaskbar 服務顯示 Razer 裝置電量。
+  tags:
+    - razer
+    - battery
+    - toolbar
+  icon: MdBattery5Bar
+
+target: "@seelen/fancy-toolbar"
+
+plugin:
+  type: text
+  withMediaControls: false
+  remoteData:
+    status:
+      url: http://127.0.0.1:27212/v1/status
+      updateIntervalSeconds: 5
+  template: !include plugin/template.js
+  tooltip: !include plugin/tooltip.js
+  style:
+    flexShrink: 0
