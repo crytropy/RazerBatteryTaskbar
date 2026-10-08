@@ -1,22 +1,25 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;
+mod polling;
+mod settings_menu;
 mod startup;
 
 use std::error::Error;
-use std::thread;
 use std::time::Duration;
 
 use api::SharedIntegrationState;
 use notify_rust::{Notification, Urgency};
+use polling::PollScheduler;
 use razer_core::frontend::FrontendSnapshot;
 use razer_core::notifications::{NotificationKind, NotificationRequest, evaluate_events};
 use razer_core::service::CoreService;
 use razer_core::settings::{AppSettings, SettingsStore};
 use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
+use settings_menu::SettingsMenu;
 use single_instance::SingleInstance;
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
+use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -48,10 +51,10 @@ struct TrayApplication {
     settings_store: Option<SettingsStore>,
     settings: AppSettings,
     integration_state: SharedIntegrationState,
+    poll_scheduler: PollScheduler,
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
-    notifications_item: Option<CheckMenuItem>,
-    start_with_windows_item: Option<CheckMenuItem>,
+    settings_menu: Option<SettingsMenu>,
     refresh_item: Option<MenuItem>,
     quit_item: Option<MenuItem>,
 }
@@ -61,16 +64,17 @@ impl TrayApplication {
         settings_store: Option<SettingsStore>,
         settings: AppSettings,
         integration_state: SharedIntegrationState,
+        poll_scheduler: PollScheduler,
     ) -> Self {
         Self {
             core: CoreService::new(PlaceholderTransport),
             settings_store,
             settings,
             integration_state,
+            poll_scheduler,
             tray: None,
             status_item: None,
-            notifications_item: None,
-            start_with_windows_item: None,
+            settings_menu: None,
             refresh_item: None,
             quit_item: None,
         }
@@ -79,26 +83,12 @@ impl TrayApplication {
     fn create_tray(&mut self) -> Result<(), Box<dyn Error>> {
         let menu = Menu::new();
         let status_item = MenuItem::new("Starting native core…", false, None);
-        let notifications_item = CheckMenuItem::with_id(
-            "notifications",
-            "Notifications",
-            true,
-            self.settings.notifications.enabled,
-            None,
-        );
-        let start_with_windows_item = CheckMenuItem::with_id(
-            "start-with-windows",
-            "Start with Windows",
-            true,
-            self.settings.start_with_windows,
-            None,
-        );
+        let settings_menu = SettingsMenu::new(&self.settings)?;
         let refresh_item = MenuItem::with_id("refresh", "Refresh", true, None);
         let quit_item = MenuItem::with_id("quit", "Quit", true, None);
 
         menu.append(&status_item)?;
-        menu.append(&notifications_item)?;
-        menu.append(&start_with_windows_item)?;
+        menu.append(&settings_menu.root)?;
         menu.append(&refresh_item)?;
         menu.append(&quit_item)?;
 
@@ -110,8 +100,7 @@ impl TrayApplication {
 
         self.tray = Some(tray);
         self.status_item = Some(status_item);
-        self.notifications_item = Some(notifications_item);
-        self.start_with_windows_item = Some(start_with_windows_item);
+        self.settings_menu = Some(settings_menu);
         self.refresh_item = Some(refresh_item);
         self.quit_item = Some(quit_item);
 
@@ -159,14 +148,50 @@ impl TrayApplication {
         }
     }
 
+    fn sync_settings_menu(&self) {
+        if let Some(menu) = &self.settings_menu {
+            menu.sync(&self.settings);
+        }
+    }
+
     fn toggle_notifications(&mut self) {
         self.settings.notifications.enabled = !self.settings.notifications.enabled;
+        self.sync_settings_menu();
+        self.persist_settings("notification setting");
+    }
 
-        if let Some(item) = &self.notifications_item {
-            item.set_checked(self.settings.notifications.enabled);
+    fn set_poll_interval(&mut self, seconds: u64) {
+        self.settings.poll_interval_seconds = seconds;
+        self.sync_settings_menu();
+        self.persist_settings("poll interval");
+
+        if !self
+            .poll_scheduler
+            .set_interval(Duration::from_secs(seconds))
+        {
+            eprintln!("failed to update active poll interval");
+        }
+    }
+
+    fn set_low_battery_threshold(&mut self, percent: u8) {
+        self.settings.notifications.low_battery_percent = percent;
+
+        if self.settings.notifications.critical_battery_percent > percent {
+            self.settings.notifications.critical_battery_percent = percent;
         }
 
-        self.persist_settings("notification setting");
+        self.sync_settings_menu();
+        self.persist_settings("low battery threshold");
+    }
+
+    fn set_critical_battery_threshold(&mut self, percent: u8) {
+        if percent > self.settings.notifications.low_battery_percent {
+            return;
+        }
+
+        self.settings.notifications.critical_battery_percent = percent;
+        self.sync_settings_menu();
+        self.persist_settings("critical battery threshold");
     }
 
     fn toggle_start_with_windows(&mut self) {
@@ -175,39 +200,59 @@ impl TrayApplication {
         match startup::set_enabled(next) {
             Ok(()) => {
                 self.settings.start_with_windows = next;
-
-                if let Some(item) = &self.start_with_windows_item {
-                    item.set_checked(next);
-                }
-
+                self.sync_settings_menu();
                 self.persist_settings("start-with-Windows setting");
             }
             Err(error) => {
                 eprintln!("failed to update start-with-Windows registration: {error}");
-
-                if let Some(item) = &self.start_with_windows_item {
-                    item.set_checked(self.settings.start_with_windows);
-                }
+                self.sync_settings_menu();
             }
         }
     }
 
     fn handle_menu(&mut self, event_loop: &ActiveEventLoop, event: MenuEvent) {
-        if self
-            .notifications_item
+        let notifications_event = self
+            .settings_menu
             .as_ref()
-            .is_some_and(|item| event.id == *item.id())
-        {
+            .is_some_and(|menu| menu.is_notifications_event(&event));
+        if notifications_event {
             self.toggle_notifications();
             return;
         }
 
-        if self
-            .start_with_windows_item
+        let start_with_windows_event = self
+            .settings_menu
             .as_ref()
-            .is_some_and(|item| event.id == *item.id())
-        {
+            .is_some_and(|menu| menu.is_start_with_windows_event(&event));
+        if start_with_windows_event {
             self.toggle_start_with_windows();
+            return;
+        }
+
+        let poll_interval = self
+            .settings_menu
+            .as_ref()
+            .and_then(|menu| menu.poll_interval_for_event(&event));
+        if let Some(seconds) = poll_interval {
+            self.set_poll_interval(seconds);
+            return;
+        }
+
+        let low_battery = self
+            .settings_menu
+            .as_ref()
+            .and_then(|menu| menu.low_battery_for_event(&event));
+        if let Some(percent) = low_battery {
+            self.set_low_battery_threshold(percent);
+            return;
+        }
+
+        let critical_battery = self
+            .settings_menu
+            .as_ref()
+            .and_then(|menu| menu.critical_battery_for_event(&event));
+        if let Some(percent) = critical_battery {
+            self.set_critical_battery_threshold(percent);
             return;
         }
 
@@ -371,7 +416,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (settings_store, mut settings) = load_settings();
     reconcile_startup_setting(settings_store.as_ref(), &mut settings);
-    let poll_interval = Duration::from_secs(settings.poll_interval_seconds);
+    let initial_poll_interval = Duration::from_secs(settings.poll_interval_seconds);
 
     let integration_state = api::initial_state();
     let _api_thread = match api::start(integration_state.clone()) {
@@ -394,17 +439,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     }));
 
     let tick_proxy = event_loop.create_proxy();
-    thread::spawn(move || {
-        loop {
-            thread::sleep(poll_interval);
-
-            if tick_proxy.send_event(UserEvent::Tick).is_err() {
-                break;
-            }
-        }
+    let poll_scheduler = PollScheduler::start(initial_poll_interval, move || {
+        tick_proxy.send_event(UserEvent::Tick).is_ok()
     });
 
-    let mut application = TrayApplication::new(settings_store, settings, integration_state);
+    let mut application = TrayApplication::new(
+        settings_store,
+        settings,
+        integration_state,
+        poll_scheduler,
+    );
     event_loop.run_app(&mut application)?;
     drop(instance_guard);
 

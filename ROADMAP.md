@@ -23,7 +23,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Hardware validation |
 | 8 | Move the stable core to Rust | Core contracts migrated |
 | 9 | Build the lightweight Windows tray frontend | Shell + startup + single-instance compiling |
-| 10 | Add persistent settings | Core/persistence + tray toggles complete |
+| 10 | Add persistent settings | Core/persistence + tray polling/threshold controls complete |
 | 11 | Add low/critical battery notifications | Windows adapter compiling; runtime verification pending |
 | 12 | Add an optional integration API/IPC boundary | Read-only loopback API implemented |
 | 13 | Add optional Seelen UI integration | Fancy Toolbar adapter scaffold complete |
@@ -36,7 +36,7 @@ The Electron application remains the usable compatibility runtime while the Rust
 
 The Rust core contains protocol handling, the shared device database, normalized state, multi-device management, events, transport abstraction, the core service, privacy-safe frontend snapshots, a versioned integration JSON contract, persistent settings, and notification policy.
 
-The native tray shell lives in `native/razer-tray`. It owns the Windows event loop, system tray icon/menu, refresh scheduling, settings persistence integration, Windows notification adapter, per-user startup registration, single-instance protection, and a read-only loopback status API, but deliberately uses a placeholder transport until HID hardware validation is complete.
+The native tray shell lives in `native/razer-tray`. It owns the Windows event loop, system tray icon/menu, runtime-adjustable refresh scheduling, settings persistence integration, notification threshold controls, Windows notification adapter, per-user startup registration, single-instance protection, and a read-only loopback status API, but deliberately uses a placeholder transport until HID hardware validation is complete.
 
 ## Phase 7 hardware validation
 

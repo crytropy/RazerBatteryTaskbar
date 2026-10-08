@@ -40,3 +40,26 @@ A notification request is generated when:
 Repeated samples inside the same severity band do not generate another request. Battery recovery, disconnection, and charging-state-only changes do not generate low-battery notifications.
 
 Notification payloads use the serial-free frontend device state, so serial numbers and internal device IDs do not cross the frontend boundary.
+
+
+## Native tray settings menu
+
+The Windows tray exposes a Settings submenu for the commonly changed values.
+
+Polling interval choices:
+
+- 5 seconds;
+- 15 seconds;
+- 30 seconds;
+- 1 minute;
+- 5 minutes.
+
+Changing the polling interval updates the running scheduler immediately and triggers a refresh. Restarting the application is not required.
+
+Low-battery threshold choices are 10%, 15%, 20%, 25%, and 30%.
+
+Critical-battery threshold choices are 5%, 10%, 15%, and 20%. Critical values above the current low-battery threshold are disabled. If the low threshold is lowered below the current critical threshold, the critical threshold is clamped down to the new low threshold so the persisted settings remain valid.
+
+The Settings submenu also contains Notifications and Start with Windows toggles.
+
+Values outside the menu presets can still exist in the JSON settings file as long as they satisfy core validation. In that case no preset is checked until a menu preset is selected.

@@ -12,7 +12,8 @@ The native tray owns Windows/UI concerns only:
 
 - Win32-compatible event loop through winit;
 - system tray icon and menu through tray-icon;
-- periodic refresh scheduling based on persistent settings;
+- periodic refresh scheduling with a runtime-adjustable polling interval;
+- tray Settings submenu for polling and notification thresholds;
 - frontend-safe core snapshots;
 - Windows desktop notification delivery through notify-rust;
 - persistent Notifications on/off toggle;
@@ -21,6 +22,20 @@ The native tray owns Windows/UI concerns only:
 - Refresh and Quit actions.
 
 It does not parse Razer packets, enumerate HID collections, or know device serial numbers.
+
+## Tray settings
+
+The Settings submenu contains:
+
+- Notifications;
+- Low battery threshold;
+- Critical battery threshold;
+- Polling interval;
+- Start with Windows.
+
+Changing the polling interval updates the active scheduler immediately. It does not create a second polling thread and does not require an application restart.
+
+Threshold changes are validated before persistence. Critical-battery choices above the selected low-battery threshold are disabled.
 
 ## Start with Windows
 
@@ -48,6 +63,6 @@ Windows toast and startup behavior still require real desktop runtime verificati
 
 ## Next steps
 
-1. Add settings UI/menu actions for thresholds, polling, and primary device.
+1. Add primary-device selection once real HID devices can be enumerated by the native transport.
 2. Replace `PlaceholderTransport` with the real HID transport after hardware validation.
 3. Package the native tray separately from the Electron compatibility build.
