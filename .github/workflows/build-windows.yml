@@ -8,6 +8,7 @@ on:
       - 'v*'
     paths-ignore:
       - 'native/**'
+      - '.github/workflows/rust-core.yml'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'docs/**'
