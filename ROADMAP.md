@@ -20,7 +20,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 4 | Move supported hardware into a maintainable device database | Complete |
 | 5 | Add multi-device support | Complete |
 | 6 | Add a device event system | Complete |
-| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Next |
+| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | In progress |
 | 8 | Move the stable core to Rust | Planned |
 | 9 | Build the lightweight Windows tray frontend | Planned |
 | 10 | Add persistent settings | Planned |
@@ -37,29 +37,19 @@ The Electron application is still the runtime during the compatibility phase, bu
 - `src/core/device-state.js` owns normalized per-device application state.
 - `src/core/device-manager.js` owns the collection of known devices, primary-device selection, and state transition detection.
 - `src/core/device-events.js` defines the UI-independent event contract.
+- `src/transport/webusb-transport.js` owns WebUSB enumeration and USB hotplug monitoring.
 - `src/devices/razer-products.json` is the maintainable supported-device database.
-- `src/devices/razer-products.js` validates and exposes that database.
 - `src/protocol/razer-protocol.js` builds/parses Razer battery protocol messages.
-- `src/usb/razer-battery-reader.js` enumerates supported WebUSB devices and queries them sequentially.
-- `src/ui/tray-controller.js` renders the primary device and lists all known devices in the tray menu.
-- `src/main.js` coordinates polling and application lifecycle.
+- `src/usb/razer-battery-reader.js` performs Razer control transfers using an injected transport.
+- `src/ui/tray-controller.js` renders normalized device state.
+- `src/main.js` coordinates lifecycle, refresh scheduling, and Windows resume handling.
 
-Regression tests cover the state model, device manager, event transitions, device database, and protocol. CI runs tests before publishing the Windows development build.
+The compatibility transport now supports debounced attach/detach refreshes, fast retry after temporary enumeration failures, and a delayed refresh after Windows resumes from sleep. The 30-second poll remains as a safety net.
 
-## Event contract
+See `docs/TRANSPORT.md` for the Windows driver and Rust-transport decision policy.
 
-The core now emits:
+## Next Phase 7 work
 
-- `device-connected`
-- `device-disconnected`
-- `battery-changed`
-- `charging-changed`
-- `devices-changed`
+Real-hardware verification is required before selecting the final Rust transport. In particular, test supported Razer hardware with Razer Synapse running, USB unplug/replug, receiver reconnect, and Windows sleep/resume. No automatic driver replacement will be introduced.
 
-Device-specific events carry immutable `previous` and `current` state references. The aggregate `devices-changed` event carries the latest device list and selected primary device.
-
-The tray subscribes to the aggregate event rather than being called directly by the polling loop. Future notification, API, and Seelen integrations can subscribe to the same core events without changing USB transport code.
-
-## Next phase
-
-Phase 7 will evaluate and harden the Windows transport layer. The immediate goals are hotplug/reconnect behavior, transport isolation, and validating coexistence with Razer Synapse before committing to the later Rust transport implementation.
+After those tests, Phase 8 can implement the selected transport in the Rust core without changing the event/UI contracts.

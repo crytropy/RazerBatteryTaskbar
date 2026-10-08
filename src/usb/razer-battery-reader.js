@@ -1,4 +1,3 @@
-const { WebUSB } = require('usb');
 const {
     getRazerProduct,
     isSupportedRazerDevice,
@@ -28,15 +27,17 @@ function buildReading(device, product, battery = null) {
 }
 
 class RazerBatteryReader {
-    constructor() {
+    constructor({ transport }) {
+        if (!transport || typeof transport.listDevices !== 'function') {
+            throw new TypeError('RazerBatteryReader requires a transport');
+        }
+
+        this.transport = transport;
         this.activeDevices = new Set();
-        this.webUsb = new WebUSB({
-            allowAllDevices: true,
-        });
     }
 
     async listSupportedDevices() {
-        const devices = await this.webUsb.getDevices();
+        const devices = await this.transport.listDevices();
         return devices.filter(isSupportedRazerDevice);
     }
 
@@ -60,16 +61,6 @@ class RazerBatteryReader {
         }
 
         return readings;
-    }
-
-    async readBattery() {
-        const readings = await this.readAllBatteries();
-
-        if (readings.length === 0) {
-            throw new Error('No supported Razer device found on system');
-        }
-
-        return readings[0];
     }
 
     async readBatteryFromDevice(device, product) {
