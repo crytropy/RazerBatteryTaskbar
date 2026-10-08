@@ -7,8 +7,7 @@ use serde::Deserialize;
 
 use crate::state::DeviceType;
 
-const PRODUCT_DATABASE_JSON: &str =
-    include_str!("../../../src/devices/razer-products.json");
+const PRODUCT_DATABASE_JSON: &str = include_str!("../../../src/devices/razer-products.json");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductDefinition {
@@ -32,10 +31,7 @@ struct RawProductDefinition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceDatabaseError {
     InvalidJson(String),
-    InvalidHex {
-        field: &'static str,
-        value: String,
-    },
+    InvalidHex { field: &'static str, value: String },
     DuplicateProductId(u16),
     InvalidDeviceType(String),
     TransactionIdOutOfRange(u16),
@@ -44,7 +40,9 @@ pub enum DeviceDatabaseError {
 impl Display for DeviceDatabaseError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidJson(message) => write!(formatter, "invalid device database JSON: {message}"),
+            Self::InvalidJson(message) => {
+                write!(formatter, "invalid device database JSON: {message}")
+            }
             Self::InvalidHex { field, value } => {
                 write!(formatter, "{field} must be a hexadecimal string: {value}")
             }
@@ -55,7 +53,10 @@ impl Display for DeviceDatabaseError {
                 write!(formatter, "unsupported Razer device type: {device_type}")
             }
             Self::TransactionIdOutOfRange(transaction_id) => {
-                write!(formatter, "transaction ID is out of byte range: 0x{transaction_id:04X}")
+                write!(
+                    formatter,
+                    "transaction ID is out of byte range: 0x{transaction_id:04X}"
+                )
             }
         }
     }
@@ -91,7 +92,9 @@ pub fn load_product_database() -> Result<Vec<ProductDefinition>, DeviceDatabaseE
         let device_type = DeviceType::parse(&definition.device_type);
 
         if device_type == DeviceType::Unknown && definition.device_type != "unknown" {
-            return Err(DeviceDatabaseError::InvalidDeviceType(definition.device_type));
+            return Err(DeviceDatabaseError::InvalidDeviceType(
+                definition.device_type,
+            ));
         }
 
         if transaction_id > u8::MAX as u16 {
@@ -118,9 +121,8 @@ pub fn product_database() -> &'static [ProductDefinition] {
 
     DATABASE
         .get_or_init(|| {
-            load_product_database().expect(
-                "embedded Razer product database must be valid at build/runtime",
-            )
+            load_product_database()
+                .expect("embedded Razer product database must be valid at build/runtime")
         })
         .as_slice()
 }

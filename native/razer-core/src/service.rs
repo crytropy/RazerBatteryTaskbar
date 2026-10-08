@@ -30,7 +30,10 @@ impl<T: BatteryTransport> CoreService<T> {
     }
 
     pub fn with_failure_threshold(transport: T, failure_threshold: u32) -> Self {
-        assert!(failure_threshold > 0, "failure threshold must be at least 1");
+        assert!(
+            failure_threshold > 0,
+            "failure threshold must be at least 1"
+        );
 
         Self {
             transport,
@@ -145,9 +148,7 @@ mod tests {
         }
 
         fn read_devices(&mut self) -> Result<Vec<DeviceReading>, TransportError> {
-            self.results
-                .pop_front()
-                .unwrap_or_else(|| Ok(Vec::new()))
+            self.results.pop_front().unwrap_or_else(|| Ok(Vec::new()))
         }
     }
 
@@ -216,7 +217,10 @@ mod tests {
         assert_eq!(failed.consecutive_transport_failures, 3);
         assert!(!failed.devices[0].connected);
         assert!(matches!(failed.events[0], DeviceEvent::Disconnected { .. }));
-        assert!(matches!(failed.events[1], DeviceEvent::DevicesChanged { .. }));
+        assert!(matches!(
+            failed.events[1],
+            DeviceEvent::DevicesChanged { .. }
+        ));
     }
 
     #[test]
@@ -246,7 +250,10 @@ mod tests {
 
         assert!(snapshot.transport_healthy);
         assert_eq!(snapshot.devices.len(), 1);
-        assert_eq!(snapshot.primary_device.as_ref().unwrap().battery, Some(66.0));
+        assert_eq!(
+            snapshot.primary_device.as_ref().unwrap().battery,
+            Some(66.0)
+        );
 
         let debug = format!("{snapshot:?}");
         assert!(!debug.contains("MOUSE-1"));

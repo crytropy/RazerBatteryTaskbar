@@ -148,7 +148,11 @@ fn compare_devices(left: &DeviceState, right: &DeviceState) -> std::cmp::Orderin
     right
         .connected
         .cmp(&left.connected)
-        .then_with(|| left.device_type.priority().cmp(&right.device_type.priority()))
+        .then_with(|| {
+            left.device_type
+                .priority()
+                .cmp(&right.device_type.priority())
+        })
         .then_with(|| {
             left.name
                 .as_deref()
@@ -237,7 +241,10 @@ mod tests {
 
         let disconnected = manager.update_from_readings(Vec::new());
         assert!(matches!(disconnected[0], DeviceEvent::Disconnected { .. }));
-        assert!(matches!(disconnected[1], DeviceEvent::DevicesChanged { .. }));
+        assert!(matches!(
+            disconnected[1],
+            DeviceEvent::DevicesChanged { .. }
+        ));
     }
 
     #[test]
@@ -245,8 +252,22 @@ mod tests {
         let mut manager = DeviceManager::new();
 
         manager.update_from_readings(vec![
-            reading(0x0088, "Dock receiver", DeviceType::Dongle, "D", Some(90.0), None),
-            reading(0x0555, "Headset", DeviceType::Headset, "H", Some(80.0), None),
+            reading(
+                0x0088,
+                "Dock receiver",
+                DeviceType::Dongle,
+                "D",
+                Some(90.0),
+                None,
+            ),
+            reading(
+                0x0555,
+                "Headset",
+                DeviceType::Headset,
+                "H",
+                Some(80.0),
+                None,
+            ),
             reading(0x00A4, "Dock", DeviceType::Dock, "K", Some(100.0), None),
             reading(0x00AB, "Mouse", DeviceType::Mouse, "M", Some(70.0), None),
         ]);
