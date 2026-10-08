@@ -1,5 +1,6 @@
 use crate::diagnostics::DiagnosticsSnapshot;
 use crate::events::DeviceEvent;
+use crate::frontend::{FrontendDeviceState, FrontendSnapshot};
 use crate::manager::DeviceManager;
 use crate::state::DeviceState;
 use crate::transport::BatteryTransport;
@@ -77,6 +78,24 @@ impl<T: BatteryTransport> CoreService<T> {
 
     pub fn primary_device(&self) -> Option<DeviceState> {
         self.manager.primary_device()
+    }
+
+    pub fn frontend_snapshot(&self) -> FrontendSnapshot {
+        FrontendSnapshot {
+            devices: self
+                .manager
+                .devices()
+                .iter()
+                .map(FrontendDeviceState::from)
+                .collect(),
+            primary_device: self
+                .manager
+                .primary_device()
+                .as_ref()
+                .map(FrontendDeviceState::from),
+            transport_healthy: self.consecutive_transport_failures == 0,
+            consecutive_transport_failures: self.consecutive_transport_failures,
+        }
     }
 
     pub fn diagnostics(&self) -> DiagnosticsSnapshot {
@@ -215,5 +234,22 @@ mod tests {
         assert_eq!(recovered.transport_error, None);
         assert_eq!(recovered.primary_device.unwrap().battery, Some(75.0));
         assert_eq!(service.diagnostics().last_transport_error, None);
+    }
+
+    #[test]
+    fn frontend_snapshot_is_serial_free_and_reports_transport_health() {
+        let transport = ScriptedTransport::new(vec![Ok(vec![mouse_reading(66.0)])]);
+        let mut service = CoreService::new(transport);
+        service.refresh();
+
+        let snapshot = service.frontend_snapshot();
+
+        assert!(snapshot.transport_healthy);
+        assert_eq!(snapshot.devices.len(), 1);
+        assert_eq!(snapshot.primary_device.unwrap().battery, Some(66.0));
+
+        let debug = format!("{snapshot:?}");
+        assert!(!debug.contains("MOUSE-1"));
+        assert!(!debug.contains("usb:1532"));
     }
 }

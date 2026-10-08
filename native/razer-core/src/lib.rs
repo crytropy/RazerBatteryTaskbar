@@ -1,6 +1,7 @@
 pub mod device_db;
 pub mod diagnostics;
 pub mod events;
+pub mod frontend;
 pub mod manager;
 pub mod protocol;
 pub mod service;
