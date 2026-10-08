@@ -6,9 +6,7 @@ use std::time::Duration;
 
 use notify_rust::{Notification, Urgency};
 use razer_core::frontend::FrontendSnapshot;
-use razer_core::notifications::{
-    NotificationKind, NotificationRequest, evaluate_events,
-};
+use razer_core::notifications::{NotificationKind, NotificationRequest, evaluate_events};
 use razer_core::service::CoreService;
 use razer_core::settings::{AppSettings, SettingsStore};
 use razer_core::state::DeviceReading;
