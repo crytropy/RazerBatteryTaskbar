@@ -202,7 +202,10 @@ mod tests {
             .as_nanos();
 
         std::env::temp_dir()
-            .join(format!("razer-battery-settings-{}-{unique}", std::process::id()))
+            .join(format!(
+                "razer-battery-settings-{}-{unique}",
+                std::process::id()
+            ))
             .join("settings.json")
     }
 
