@@ -5,9 +5,24 @@ const {
     nativeImage,
 } = require('electron');
 
+function formatDeviceLabel(device) {
+    const name = device.name || 'Unknown Razer device';
+
+    if (!device.connected) {
+        return name + ' — Disconnected';
+    }
+
+    if (!Number.isFinite(device.battery)) {
+        return name + ' — Battery unavailable';
+    }
+
+    return name + ' — ' + device.battery.toFixed(1) + '%';
+}
+
 class TrayController {
-    constructor({ rootPath, onQuit }) {
+    constructor({ rootPath, onRefresh, onQuit }) {
         this.rootPath = rootPath;
+        this.onRefresh = onRefresh;
         this.onQuit = onQuit;
         this.tray = null;
     }
@@ -16,33 +31,58 @@ class TrayController {
         const icon = nativeImage.createFromPath(this.getBatteryIconPath(0));
         this.tray = new Tray(icon);
 
-        const contextMenu = Menu.buildFromTemplate([
-            { label: 'Quit', type: 'normal', click: this.onQuit },
-        ]);
-
-        this.tray.setContextMenu(contextMenu);
-        this.tray.setToolTip('Searching for device');
+        this.tray.setToolTip('Searching for Razer devices');
         this.tray.setTitle('Razer battery life');
+        this.setDevices([], null);
     }
 
-    setDeviceState(state) {
-        if (!state?.connected || !Number.isFinite(state.battery)) {
-            this.setDisconnected();
-            return;
-        }
-
-        const normalizedBattery = Math.min(100, Math.max(0, state.battery));
-        this.tray.setImage(nativeImage.createFromPath(this.getBatteryIconPath(normalizedBattery)));
-        this.tray.setToolTip(normalizedBattery.toFixed(1) + '%');
-    }
-
-    setDisconnected() {
+    setDevices(devices, primaryDevice) {
         if (!this.tray) {
             return;
         }
 
-        this.tray.setImage(nativeImage.createFromPath(this.getBatteryIconPath(0)));
-        this.tray.setToolTip('Device disconnected');
+        this.updatePrimaryDisplay(primaryDevice);
+        this.tray.setContextMenu(this.buildContextMenu(devices));
+    }
+
+    updatePrimaryDisplay(primaryDevice) {
+        if (!primaryDevice?.connected) {
+            this.tray.setImage(nativeImage.createFromPath(this.getBatteryIconPath(0)));
+            this.tray.setToolTip('No supported Razer device detected');
+            return;
+        }
+
+        if (!Number.isFinite(primaryDevice.battery)) {
+            this.tray.setImage(nativeImage.createFromPath(this.getBatteryIconPath(0)));
+            this.tray.setToolTip((primaryDevice.name || 'Razer device') + ': Battery unavailable');
+            return;
+        }
+
+        const normalizedBattery = Math.min(100, Math.max(0, primaryDevice.battery));
+        this.tray.setImage(nativeImage.createFromPath(this.getBatteryIconPath(normalizedBattery)));
+        this.tray.setToolTip(
+            (primaryDevice.name || 'Razer device') + ': ' + normalizedBattery.toFixed(1) + '%',
+        );
+    }
+
+    buildContextMenu(devices) {
+        const deviceItems = devices.length > 0
+            ? devices.map(device => ({
+                label: formatDeviceLabel(device),
+                enabled: false,
+            }))
+            : [{
+                label: 'No supported Razer devices',
+                enabled: false,
+            }];
+
+        return Menu.buildFromTemplate([
+            ...deviceItems,
+            { type: 'separator' },
+            { label: 'Refresh', type: 'normal', click: this.onRefresh },
+            { type: 'separator' },
+            { label: 'Quit', type: 'normal', click: this.onQuit },
+        ]);
     }
 
     getBatteryIconPath(battery) {
@@ -60,4 +100,5 @@ class TrayController {
 
 module.exports = {
     TrayController,
+    formatDeviceLabel,
 };

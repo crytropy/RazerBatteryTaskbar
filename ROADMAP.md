@@ -18,8 +18,8 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 2 | Split the Electron prototype into device/protocol/transport/UI modules | Complete |
 | 3 | Introduce a normalized device state model | Complete |
 | 4 | Move supported hardware into a maintainable device database | Complete |
-| 5 | Add multi-device support | Next |
-| 6 | Add a device event system | Planned |
+| 5 | Add multi-device support | Complete |
+| 6 | Add a device event system | Next |
 | 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Planned |
 | 8 | Move the stable core to Rust | Planned |
 | 9 | Build the lightweight Windows tray frontend | Planned |
@@ -34,16 +34,23 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 
 The Electron application is still the runtime during the compatibility phase, but responsibilities are now separated:
 
-- `src/core/device-state.js` owns normalized application device state.
+- `src/core/device-state.js` owns normalized per-device application state.
+- `src/core/device-manager.js` owns the collection of known devices and primary-device selection.
 - `src/devices/razer-products.json` is the maintainable supported-device database.
 - `src/devices/razer-products.js` validates and exposes that database.
 - `src/protocol/razer-protocol.js` builds/parses Razer battery protocol messages.
-- `src/usb/razer-battery-reader.js` owns WebUSB transport access.
-- `src/ui/tray-controller.js` only renders normalized state.
+- `src/usb/razer-battery-reader.js` enumerates supported WebUSB devices and queries them sequentially.
+- `src/ui/tray-controller.js` renders the primary device and lists all known devices in the tray menu.
 - `src/main.js` coordinates polling and application lifecycle.
 
-Basic regression tests now cover the state model, device database, and protocol. Full CI coverage remains part of Phase 14.
+Regression tests cover the state model, device manager, device database, and protocol. CI runs tests before publishing the Windows development build.
+
+## Multi-device behavior
+
+Each poll enumerates all supported Razer USB devices. Battery queries are performed sequentially so one device does not block the others. A detected device whose battery query fails remains connected with an unavailable battery value, while devices missing from a later scan are retained as disconnected states.
+
+The tray icon follows a primary device. Until a user-selectable primary device is added in the settings phase, the manager prefers a connected device with a readable battery and uses a deterministic device-type/name ordering.
 
 ## Next phase
 
-Phase 5 will replace the single-device assumption with a device collection and per-device state tracking while preserving the current tray behavior as the default presentation.
+Phase 6 will introduce events such as DeviceConnected, DeviceDisconnected, BatteryChanged, and ChargingChanged so tray, notifications, APIs, and future Seelen UI integration can subscribe without coupling themselves to the polling loop.

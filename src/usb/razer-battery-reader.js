@@ -1,6 +1,5 @@
 const { WebUSB } = require('usb');
 const {
-    RAZER_VENDOR_ID,
     getRazerProduct,
     isSupportedRazerDevice,
 } = require('../devices/razer-products');
@@ -16,30 +15,65 @@ function delay(milliseconds) {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
+function buildReading(device, product, battery = null) {
+    return {
+        vendorId: device.vendorId,
+        productId: device.productId,
+        productName: product.name,
+        deviceType: product.type,
+        serialNumber: device.serialNumber || null,
+        battery,
+        charging: null,
+    };
+}
+
 class RazerBatteryReader {
     constructor() {
-        this.activeDevice = null;
+        this.activeDevices = new Set();
         this.webUsb = new WebUSB({
-            devicesFound: devices => devices.find(isSupportedRazerDevice),
+            allowAllDevices: true,
         });
     }
 
-    async findSupportedDevice() {
-        const device = await this.webUsb.requestDevice({
-            filters: [{ vendorId: RAZER_VENDOR_ID }],
-        });
+    async listSupportedDevices() {
+        const devices = await this.webUsb.getDevices();
+        return devices.filter(isSupportedRazerDevice);
+    }
 
-        if (!device || !isSupportedRazerDevice(device)) {
-            throw new Error('No supported Razer device found on system');
+    async readAllBatteries() {
+        const devices = await this.listSupportedDevices();
+        const readings = [];
+
+        for (const device of devices) {
+            const product = getRazerProduct(device.productId);
+
+            try {
+                readings.push(await this.readBatteryFromDevice(device, product));
+            } catch (error) {
+                console.warn(
+                    '[usb] Failed to read ' + product.name + ':',
+                    error,
+                );
+
+                readings.push(buildReading(device, product));
+            }
         }
 
-        const product = getRazerProduct(device.productId);
-        return { device, product };
+        return readings;
     }
 
     async readBattery() {
-        const { device, product } = await this.findSupportedDevice();
-        this.activeDevice = device;
+        const readings = await this.readAllBatteries();
+
+        if (readings.length === 0) {
+            throw new Error('No supported Razer device found on system');
+        }
+
+        return readings[0];
+    }
+
+    async readBatteryFromDevice(device, product) {
+        this.activeDevices.add(device);
 
         let interfaceNumber = null;
         let interfaceClaimed = false;
@@ -87,21 +121,10 @@ class RazerBatteryReader {
                 throw new Error('Battery response failed with status: ' + reply.status);
             }
 
-            return {
-                vendorId: device.vendorId,
-                productId: device.productId,
-                productName: product.name,
-                deviceType: product.type,
-                serialNumber: device.serialNumber || null,
-                battery: parseBatteryLevel(reply.data),
-                charging: null,
-            };
+            return buildReading(device, product, parseBatteryLevel(reply.data));
         } finally {
             await this.releaseDevice(device, interfaceNumber, interfaceClaimed);
-
-            if (this.activeDevice === device) {
-                this.activeDevice = null;
-            }
+            this.activeDevices.delete(device);
         }
     }
 
@@ -124,18 +147,26 @@ class RazerBatteryReader {
     }
 
     async dispose() {
-        if (!this.activeDevice || !this.activeDevice.opened) {
-            return;
-        }
+        const activeDevices = Array.from(this.activeDevices);
 
-        try {
-            await this.activeDevice.close();
-        } finally {
-            this.activeDevice = null;
+        for (const device of activeDevices) {
+            if (!device.opened) {
+                this.activeDevices.delete(device);
+                continue;
+            }
+
+            try {
+                await device.close();
+            } catch (error) {
+                console.warn('[usb] Failed to close active device:', error);
+            } finally {
+                this.activeDevices.delete(device);
+            }
         }
     }
 }
 
 module.exports = {
     RazerBatteryReader,
+    buildReading,
 };

@@ -1,5 +1,5 @@
 const { app } = require('electron');
-const { DeviceState } = require('./core/device-state');
+const { DeviceManager } = require('./core/device-manager');
 const { RazerBatteryReader } = require('./usb/razer-battery-reader');
 const { TrayController } = require('./ui/tray-controller');
 
@@ -10,28 +10,47 @@ if (require('electron-squirrel-startup')) {
 const POLL_INTERVAL_MS = 30_000;
 
 let batteryReader;
+let deviceManager;
 let trayController;
 let pollTimer = null;
+let pollInProgress = false;
 let shuttingDown = false;
-let currentState = DeviceState.disconnected();
 
-async function updateBatteryStatus() {
+function renderDeviceStates() {
+    const devices = deviceManager.getDevices();
+    trayController.setDevices(devices, deviceManager.getPrimaryDevice());
+}
+
+function scheduleNextPoll() {
     if (shuttingDown) {
         return;
     }
 
-    try {
-        const reading = await batteryReader.readBattery();
-        currentState = DeviceState.connected(reading);
-    } catch (error) {
-        console.error('[battery] Failed to read battery state:', error);
-        currentState = DeviceState.disconnected(currentState);
+    pollTimer = setTimeout(refreshDeviceStates, POLL_INTERVAL_MS);
+}
+
+async function refreshDeviceStates() {
+    if (shuttingDown || pollInProgress) {
+        return;
     }
 
-    trayController.setDeviceState(currentState);
+    pollInProgress = true;
 
-    if (!shuttingDown) {
-        pollTimer = setTimeout(updateBatteryStatus, POLL_INTERVAL_MS);
+    if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+    }
+
+    try {
+        const readings = await batteryReader.readAllBatteries();
+        deviceManager.updateFromReadings(readings);
+    } catch (error) {
+        console.error('[battery] Failed to enumerate Razer devices:', error);
+        deviceManager.markAllDisconnected();
+    } finally {
+        renderDeviceStates();
+        pollInProgress = false;
+        scheduleNextPoll();
     }
 }
 
@@ -59,12 +78,14 @@ async function quitApplication() {
 
 app.whenReady().then(() => {
     batteryReader = new RazerBatteryReader();
+    deviceManager = new DeviceManager();
     trayController = new TrayController({
         rootPath: app.getAppPath(),
+        onRefresh: refreshDeviceStates,
         onQuit: quitApplication,
     });
 
     trayController.initialize();
-    trayController.setDeviceState(currentState);
-    updateBatteryStatus();
+    renderDeviceStates();
+    refreshDeviceStates();
 });
