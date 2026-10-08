@@ -20,8 +20,8 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 4 | Move supported hardware into a maintainable device database | Complete |
 | 5 | Add multi-device support | Complete |
 | 6 | Add a device event system | Complete |
-| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | In progress |
-| 8 | Move the stable core to Rust | Planned |
+| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Hardware validation |
+| 8 | Move the stable core to Rust | In progress |
 | 9 | Build the lightweight Windows tray frontend | Planned |
 | 10 | Add persistent settings | Planned |
 | 11 | Add low/critical battery notifications | Planned |
@@ -32,24 +32,31 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 
 ## Current architecture
 
-The Electron application is still the runtime during the compatibility phase, but responsibilities are now separated:
+The Electron application remains the usable compatibility runtime while the Rust core is developed in parallel.
+
+JavaScript compatibility stack:
 
 - `src/core/device-state.js` owns normalized per-device application state.
-- `src/core/device-manager.js` owns the collection of known devices, primary-device selection, and state transition detection.
+- `src/core/device-manager.js` owns the known-device collection and state transitions.
 - `src/core/device-events.js` defines the UI-independent event contract.
-- `src/transport/webusb-transport.js` owns WebUSB enumeration and USB hotplug monitoring.
-- `src/devices/razer-products.json` is the maintainable supported-device database.
-- `src/protocol/razer-protocol.js` builds/parses Razer battery protocol messages.
-- `src/usb/razer-battery-reader.js` performs Razer control transfers using an injected transport.
-- `src/ui/tray-controller.js` renders normalized device state.
-- `src/main.js` coordinates lifecycle, refresh scheduling, and Windows resume handling.
+- `src/transport/webusb-transport.js` isolates WebUSB enumeration and hotplug monitoring.
+- `src/usb/razer-battery-reader.js` performs the current Razer control transfers.
+- `src/ui/tray-controller.js` renders normalized state only.
+- `src/main.js` coordinates lifecycle, refresh scheduling, diagnostics, and Windows resume handling.
 
-The compatibility transport now supports debounced attach/detach refreshes, fast retry after temporary enumeration failures, and a delayed refresh after Windows resumes from sleep. The 30-second poll remains as a safety net.
+Rust migration stack:
 
-See `docs/TRANSPORT.md` for the Windows driver and Rust-transport decision policy.
+- `native/razer-core` contains the first UI-independent Rust protocol implementation.
+- Rust tests verify the 90-byte battery request, CRC, and battery parser.
+- A Windows HID enumeration probe is built with the `hidapi` Windows-native backend.
+- The probe does not send feature reports and does not expose serial numbers.
 
-## Next Phase 7 work
+## Phase 7 hardware validation
 
-Real-hardware verification is required before selecting the final Rust transport. In particular, test supported Razer hardware with Razer Synapse running, USB unplug/replug, receiver reconnect, and Windows sleep/resume. No automatic driver replacement will be introduced.
+The compatibility runtime now has debounced USB attach/detach refreshes, fast retry after transient enumeration failures, delayed refresh after Windows resume, and privacy-safe diagnostics.
 
-After those tests, Phase 8 can implement the selected transport in the Rust core without changing the event/UI contracts.
+Real hardware validation remains necessary for Synapse coexistence and HID collection selection. See `docs/TESTING.md` and `docs/TRANSPORT.md`.
+
+## Phase 8 migration rule
+
+Rust must preserve the already-established device-state, event, multi-device, and transport boundaries. Seelen UI remains an optional integration and must not become a dependency of the Rust core.

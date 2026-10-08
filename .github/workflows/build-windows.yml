@@ -6,6 +6,12 @@ on:
       - main
     tags:
       - 'v*'
+    paths-ignore:
+      - 'native/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'docs/**'
+      - '*.md'
   workflow_dispatch:
 
 permissions:
