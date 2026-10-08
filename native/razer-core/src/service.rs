@@ -246,7 +246,7 @@ mod tests {
 
         assert!(snapshot.transport_healthy);
         assert_eq!(snapshot.devices.len(), 1);
-        assert_eq!(snapshot.primary_device.unwrap().battery, Some(66.0));
+        assert_eq!(snapshot.primary_device.as_ref().unwrap().battery, Some(66.0));
 
         let debug = format!("{snapshot:?}");
         assert!(!debug.contains("MOUSE-1"));
