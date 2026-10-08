@@ -1,4 +1,5 @@
 const { app } = require('electron');
+const { DEVICE_EVENTS } = require('./core/device-events');
 const { DeviceManager } = require('./core/device-manager');
 const { RazerBatteryReader } = require('./usb/razer-battery-reader');
 const { TrayController } = require('./ui/tray-controller');
@@ -17,8 +18,10 @@ let pollInProgress = false;
 let shuttingDown = false;
 
 function renderDeviceStates() {
-    const devices = deviceManager.getDevices();
-    trayController.setDevices(devices, deviceManager.getPrimaryDevice());
+    trayController.setDevices(
+        deviceManager.getDevices(),
+        deviceManager.getPrimaryDevice(),
+    );
 }
 
 function scheduleNextPoll() {
@@ -48,7 +51,6 @@ async function refreshDeviceStates() {
         console.error('[battery] Failed to enumerate Razer devices:', error);
         deviceManager.markAllDisconnected();
     } finally {
-        renderDeviceStates();
         pollInProgress = false;
         scheduleNextPoll();
     }
@@ -72,6 +74,7 @@ async function quitApplication() {
         console.warn('[usb] Failed to dispose battery reader:', error);
     }
 
+    deviceManager?.removeAllListeners();
     trayController?.destroy();
     app.quit();
 }
@@ -84,6 +87,8 @@ app.whenReady().then(() => {
         onRefresh: refreshDeviceStates,
         onQuit: quitApplication,
     });
+
+    deviceManager.on(DEVICE_EVENTS.DEVICES_CHANGED, renderDeviceStates);
 
     trayController.initialize();
     renderDeviceStates();
