@@ -1,0 +1,47 @@
+name: Rust Core
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'native/**'
+      - '.github/workflows/rust-core.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select stable Rust
+        shell: pwsh
+        run: |
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - name: Test Rust core
+        run: cargo test --workspace
+
+      - name: Build HID enumeration probe
+        run: cargo build -p razer-core --example hid-probe --features windows-hid --release
+
+      - name: Upload HID enumeration probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: RazerBattery-HID-Probe
+          path: target/release/examples/hid-probe.exe
+          if-no-files-found: error

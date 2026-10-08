@@ -1,0 +1,3 @@
+[workspace]
+members = ["native/razer-core"]
+resolver = "2"

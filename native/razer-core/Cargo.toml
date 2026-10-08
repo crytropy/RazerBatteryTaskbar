@@ -1,0 +1,13 @@
+[package]
+name = "razer-core"
+version = "0.1.0"
+edition = "2024"
+license = "ISC"
+description = "UI-independent Razer protocol core for RazerBatteryTaskbar"
+
+[features]
+default = []
+windows-hid = ["dep:hidapi"]
+
+[dependencies]
+hidapi = { version = "2.6.7", optional = true, default-features = false, features = ["windows-native"] }
