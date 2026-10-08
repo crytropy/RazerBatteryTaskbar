@@ -8,6 +8,7 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 pub const API_ADDRESS: &str = "127.0.0.1:27212";
 pub const STATUS_PATH: &str = "/v1/status";
+const SEELEN_ORIGIN: &str = "http://tauri.localhost";
 
 pub type SharedIntegrationState = Arc<RwLock<String>>;
 
@@ -106,7 +107,7 @@ fn send_response(
         .with_status_code(status)
         .with_header(header("Content-Type", content_type))
         .with_header(header("Cache-Control", "no-store"))
-        .with_header(header("Access-Control-Allow-Origin", "*"));
+        .with_header(header("Access-Control-Allow-Origin", SEELEN_ORIGIN));
 
     if let Err(error) = request.respond(response) {
         eprintln!("failed to send integration API response: {error}");

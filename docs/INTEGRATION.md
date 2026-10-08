@@ -61,6 +61,7 @@ Properties:
 - read-only;
 - `Content-Type: application/json; charset=UTF-8`;
 - `Cache-Control: no-store`;
+- CORS access limited to Seelen's `http://tauri.localhost` WebView origin;
 - no settings mutation;
 - no HID commands;
 - no serial numbers or internal IDs.
