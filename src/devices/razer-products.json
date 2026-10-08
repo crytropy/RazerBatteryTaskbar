@@ -9,7 +9,7 @@
   { "productId": "0x00B3", "name": "Razer Hyperpolling Wireless Dongle", "type": "dongle", "transactionId": "0x1F" },
   { "productId": "0x00B6", "name": "Razer Deathadder V3 Pro Wired", "type": "mouse", "transactionId": "0x1F" },
   { "productId": "0x00B7", "name": "Razer Deathadder V3 Pro Wireless", "type": "mouse", "transactionId": "0x1F" },
-  { "productId": "0x0083", "name": "Razer Basilsk X HyperSpeed", "type": "mouse", "transactionId": "0x1F" },
+  { "productId": "0x0083", "name": "Razer Basilisk X HyperSpeed", "type": "mouse", "transactionId": "0x1F" },
   { "productId": "0x0086", "name": "Razer Basilisk Ultimate", "type": "mouse", "transactionId": "0x1F" },
   { "productId": "0x0088", "name": "Razer Basilisk Ultimate Dongle", "type": "dongle", "transactionId": "0x1F" },
   { "productId": "0x008F", "name": "Razer Naga v2 Pro Wired", "type": "mouse", "transactionId": "0x1F" },

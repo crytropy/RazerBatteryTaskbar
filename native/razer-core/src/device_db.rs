@@ -151,6 +151,13 @@ mod tests {
         assert_eq!(basilisk.name, "Razer Basilisk V3 Pro Wireless");
         assert_eq!(basilisk.device_type, DeviceType::Mouse);
         assert_eq!(basilisk.transaction_id, 0x1F);
+
+        let basilisk_x = products
+            .iter()
+            .find(|product| product.product_id == 0x0083)
+            .unwrap();
+
+        assert_eq!(basilisk_x.name, "Razer Basilisk X HyperSpeed");
     }
 
     #[test]

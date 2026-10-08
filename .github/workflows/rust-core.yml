@@ -8,6 +8,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'native/**'
+      - 'src/devices/razer-products.json'
       - '.github/workflows/rust-core.yml'
   workflow_dispatch:
 
