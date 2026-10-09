@@ -233,8 +233,7 @@ impl TrayApplication {
         self.sync_settings_menu();
         self.persist_settings("poll interval");
 
-        if !self.worker.set_interval(Duration::from_secs(seconds))
-        {
+        if !self.worker.set_interval(Duration::from_secs(seconds)) {
             eprintln!("failed to update active poll interval");
         }
     }

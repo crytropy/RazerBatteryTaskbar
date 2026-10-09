@@ -59,7 +59,9 @@ impl CoreWorker {
         if interval.is_zero() {
             return false;
         }
-        self.sender.send(WorkerCommand::SetInterval(interval)).is_ok()
+        self.sender
+            .send(WorkerCommand::SetInterval(interval))
+            .is_ok()
     }
 
     pub fn set_notifications(&self, settings: NotificationSettings) -> bool {
