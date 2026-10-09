@@ -12,7 +12,7 @@ The native tray owns Windows/UI concerns only:
 
 - Win32-compatible event loop through winit;
 - system tray icon and menu through tray-icon;
-- periodic refresh scheduling with a runtime-adjustable polling interval;
+- a dedicated battery-reading worker with runtime-adjustable polling interval;
 - tray Settings submenu for polling and notification thresholds;
 - frontend-safe core snapshots;
 - Windows desktop notification delivery through notify-rust;
@@ -34,7 +34,7 @@ The Settings submenu contains:
 - Polling interval;
 - Start with Windows.
 
-Changing the polling interval updates the active scheduler immediately. It does not create a second polling thread and does not require an application restart.
+Changing the polling interval updates the active core worker immediately. It does not start another USB/HID thread and does not require an application restart.
 
 Threshold changes are validated before persistence. Critical-battery choices above the selected low-battery threshold are disabled.
 
@@ -92,13 +92,40 @@ The HID Probe supports `--json` for structured reports, `--pid 0xNNNN` for a
 specific model, and `--known-only` to filter by the shared product database.
 See [Windows hardware verification](TESTING.md).
 
+## Native background polling architecture
+
+`native/razer-tray/src/polling.rs` now owns a single background `CoreWorker`
+which exclusively owns `CoreService` and the selected battery transport.
+The GUI thread never calls `CoreService::refresh()` or touches HID.
+
+The worker:
+
+- reads immediately when started and subsequently on its configured interval;
+- accepts manual Refresh and interval changes as commands, without creating
+  concurrent HID readers;
+- coalesces queued Refresh requests before a read;
+- sends frontend-safe snapshots and notification requests to the
+  `winit` event loop for all tray, toast and local API updates;
+- stops when the tray exits, without blocking the UI on a slow HID handle;
+- preserves the existing three-failure disconnect policy and recovery.
+
+The icon clears an old battery fill when a transport error is reported,
+instead of keeping a stale battery percentage visible. The
+`transportHealthy` field indicates read errors independently from
+`transportReady` and the device's `connected` state.
+
+The worker is tested with a fake transport, without touching real hardware.
+Long-term HID reliability, physical reconnect behavior, and Windows sleep
+recovery still require real-device validation.
+
 ## Experimental 00B7 native HID (explicit opt-in)
 
 An actual one-shot HID battery query succeeded on a DeathAdder V3 Pro receiver:
 `VID=1532 PID=00B7`, `MI_00`, usage page `0001`, usage `0002`.
 The Razer reply acknowledged the command, passed transaction and checksum
-checks, and returned 78.8%. This validates **one real device/query only**;
-it does not establish long-term polling stability or Synapse coexistence.
+checks, and returned 78.8%. This validates real device/query functionality. The user also confirmed that
+battery reads work with Synapse both open and closed, but long-term
+polling stability and reconnect remain under test.
 
 Default startup continues to use `PlaceholderTransport`.
 

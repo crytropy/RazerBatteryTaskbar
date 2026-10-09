@@ -10,10 +10,9 @@ use std::time::Duration;
 
 use api::SharedIntegrationState;
 use notify_rust::{Notification, Urgency};
-use polling::PollScheduler;
+use polling::{CoreUpdate, CoreWorker};
 use razer_core::frontend::FrontendSnapshot;
-use razer_core::notifications::{NotificationKind, NotificationRequest, evaluate_events};
-use razer_core::service::CoreService;
+use razer_core::notifications::{NotificationKind, NotificationRequest};
 use razer_core::settings::{AppSettings, SettingsStore};
 use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
@@ -34,7 +33,7 @@ const MIN_EXPERIMENTAL_POLL_SECONDS: u64 = 60;
 #[derive(Debug)]
 enum UserEvent {
     Menu(MenuEvent),
-    Tick,
+    Core(CoreUpdate),
 }
 
 struct PlaceholderTransport;
@@ -86,12 +85,12 @@ impl BatteryTransport for AppTransport {
 }
 
 struct TrayApplication {
-    core: CoreService<AppTransport>,
+    worker: CoreWorker,
     experimental_hid: bool,
     settings_store: Option<SettingsStore>,
     settings: AppSettings,
     integration_state: SharedIntegrationState,
-    poll_scheduler: PollScheduler,
+    last_snapshot: Option<FrontendSnapshot>,
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
     settings_menu: Option<SettingsMenu>,
@@ -104,20 +103,16 @@ impl TrayApplication {
         settings_store: Option<SettingsStore>,
         settings: AppSettings,
         integration_state: SharedIntegrationState,
-        poll_scheduler: PollScheduler,
-        transport: AppTransport,
+        worker: CoreWorker,
         experimental_hid: bool,
     ) -> Self {
-        let mut core = CoreService::new(transport);
-        core.set_primary_device_preference(settings.primary_device.clone());
-
         Self {
-            core,
+            worker,
             experimental_hid,
             settings_store,
             settings,
             integration_state,
-            poll_scheduler,
+            last_snapshot: None,
             tray: None,
             status_item: None,
             settings_menu: None,
@@ -150,19 +145,30 @@ impl TrayApplication {
         self.refresh_item = Some(refresh_item);
         self.quit_item = Some(quit_item);
 
+        if let Some(snapshot) = &self.last_snapshot {
+            self.render(snapshot);
+        }
+
         Ok(())
     }
 
-    fn refresh(&mut self) {
-        let result = self.core.refresh();
-        let snapshot = self.core.frontend_snapshot();
-        api::update_state(&self.integration_state, &snapshot);
+    fn refresh(&self) {
+        if !self.worker.request_refresh() {
+            eprintln!("battery worker is unavailable");
+        }
+    }
 
-        for notification in evaluate_events(&result.events, &self.settings.notifications) {
-            deliver_notification(&notification);
+    fn apply_core_update(&mut self, update: CoreUpdate) {
+        api::update_state(&self.integration_state, &update.snapshot);
+
+        if self.settings.notifications.enabled {
+            for notification in &update.notifications {
+                deliver_notification(notification);
+            }
         }
 
-        self.render(&snapshot);
+        self.render(&update.snapshot);
+        self.last_snapshot = Some(update.snapshot);
     }
 
     fn render(&self, snapshot: &FrontendSnapshot) {
@@ -174,14 +180,16 @@ impl TrayApplication {
 
         if let Some(tray) = &self.tray {
             let _ = tray.set_tooltip(Some(&status));
+            let battery = if snapshot.transport_healthy && snapshot.transport_ready {
+                snapshot
+                    .primary_device
+                    .as_ref()
+                    .and_then(|device| device.battery)
+            } else {
+                None
+            };
             let _ = tray.set_icon(Some(
-                build_battery_icon(
-                    snapshot
-                        .primary_device
-                        .as_ref()
-                        .and_then(|device| device.battery),
-                )
-                .expect("generated tray icon must be valid"),
+                build_battery_icon(battery).expect("generated tray icon must be valid"),
             ));
         }
     }
@@ -200,8 +208,18 @@ impl TrayApplication {
         }
     }
 
+    fn sync_worker_notifications(&self) {
+        if !self
+            .worker
+            .set_notifications(self.settings.notifications.clone())
+        {
+            eprintln!("battery worker could not update notification preferences");
+        }
+    }
+
     fn toggle_notifications(&mut self) {
         self.settings.notifications.enabled = !self.settings.notifications.enabled;
+        self.sync_worker_notifications();
         self.sync_settings_menu();
         self.persist_settings("notification setting");
     }
@@ -215,9 +233,7 @@ impl TrayApplication {
         self.sync_settings_menu();
         self.persist_settings("poll interval");
 
-        if !self
-            .poll_scheduler
-            .set_interval(Duration::from_secs(seconds))
+        if !self.worker.set_interval(Duration::from_secs(seconds))
         {
             eprintln!("failed to update active poll interval");
         }
@@ -230,6 +246,7 @@ impl TrayApplication {
             self.settings.notifications.critical_battery_percent = percent;
         }
 
+        self.sync_worker_notifications();
         self.sync_settings_menu();
         self.persist_settings("low battery threshold");
     }
@@ -240,6 +257,7 @@ impl TrayApplication {
         }
 
         self.settings.notifications.critical_battery_percent = percent;
+        self.sync_worker_notifications();
         self.sync_settings_menu();
         self.persist_settings("critical battery threshold");
     }
@@ -339,14 +357,13 @@ impl ApplicationHandler<UserEvent> for TrayApplication {
         if self.tray.is_none() {
             self.create_tray()
                 .expect("native Windows tray should initialize");
-            self.refresh();
         }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Menu(event) => self.handle_menu(event_loop, event),
-            UserEvent::Tick => self.refresh(),
+            UserEvent::Core(update) => self.apply_core_update(update),
         }
     }
 
@@ -554,17 +571,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         let _ = menu_proxy.send_event(UserEvent::Menu(event));
     }));
 
-    let tick_proxy = event_loop.create_proxy();
-    let poll_scheduler = PollScheduler::start(initial_poll_interval, move || {
-        tick_proxy.send_event(UserEvent::Tick).is_ok()
-    });
+    let update_proxy = event_loop.create_proxy();
+    let worker = CoreWorker::start(
+        transport,
+        initial_poll_interval,
+        settings.notifications.clone(),
+        settings.primary_device.clone(),
+        move |update| update_proxy.send_event(UserEvent::Core(update)).is_ok(),
+    );
 
     let mut application = TrayApplication::new(
         settings_store,
         settings,
         integration_state,
-        poll_scheduler,
-        transport,
+        worker,
         experimental_hid,
     );
     event_loop.run_app(&mut application)?;

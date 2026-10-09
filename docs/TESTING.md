@@ -158,3 +158,22 @@ replace the Windows/Razer driver as a workaround.
 the native tray event thread and waits about 500 ms for a reply.
 This is appropriate for the first opt-in proof of concept only, not a
 completed production polling architecture.
+
+
+## Worker-thread regression tests
+
+Rust CI runs unit tests with a fake transport to ensure that:
+
+- the first device read occurs on a background thread, not the UI caller thread;
+- a burst of manual refresh requests is coalesced, not issued in parallel;
+- a changed polling interval takes effect without restarting the worker.
+
+The actual DeathAdder V3 Pro has now returned verified battery data through
+the Native Tray and JSON status API; the user reports successful reads both
+with Synapse enabled and disabled. These are positive point-in-time results,
+**not** proof of hours-long stress testing or hot-unplug/wake reliability.
+
+For a reconnect test, keep the experimental tray running, disconnect the
+00B7 receiver, inspect `/v1/status`, reconnect the receiver, and confirm
+`connected=true`, `transportHealthy=true` and an up-to-date battery value.
+Do not substitute driver changes for an inaccessible HID interface.
