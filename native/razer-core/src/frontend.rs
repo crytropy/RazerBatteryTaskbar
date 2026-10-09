@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 use crate::state::{DeviceState, DeviceType};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +27,18 @@ impl From<&DeviceState> for FrontendDeviceState {
     }
 }
 
+/// Per-process transport telemetry. Contains no device identifiers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PollStatistics {
+    pub attempts: u64,
+    pub successes: u64,
+    pub failures: u64,
+    pub last_successful_scan_unix_ms: Option<u64>,
+    pub last_battery_read_unix_ms: Option<u64>,
+    pub last_duration_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrontendSnapshot {
     pub devices: Vec<FrontendDeviceState>,
@@ -34,6 +48,7 @@ pub struct FrontendSnapshot {
     pub transport_healthy: bool,
     pub consecutive_transport_failures: u32,
     pub transport_error_kind: Option<String>,
+    pub poll_statistics: PollStatistics,
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@ use std::error::Error;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-use razer_core::frontend::FrontendSnapshot;
+use razer_core::frontend::{FrontendSnapshot, PollStatistics};
 use razer_core::integration::IntegrationSnapshot;
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
@@ -21,6 +21,7 @@ pub fn initial_state() -> SharedIntegrationState {
         transport_healthy: true,
         consecutive_transport_failures: 0,
         transport_error_kind: None,
+        poll_statistics: PollStatistics::default(),
     };
 
     Arc::new(RwLock::new(
@@ -158,6 +159,7 @@ mod tests {
             transport_healthy: true,
             consecutive_transport_failures: 0,
             transport_error_kind: None,
+            poll_statistics: PollStatistics::default(),
         };
 
         update_state(&state, &snapshot);

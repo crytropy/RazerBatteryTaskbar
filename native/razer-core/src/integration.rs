@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::frontend::{FrontendDeviceState, FrontendSnapshot};
+use crate::frontend::{FrontendDeviceState, FrontendSnapshot, PollStatistics};
 
 pub const INTEGRATION_SCHEMA_VERSION: u32 = 1;
 pub const INTEGRATION_SERVICE_NAME: &str = "RazerBatteryTaskbar";
@@ -42,6 +42,7 @@ pub struct IntegrationSnapshot {
     pub transport_healthy: bool,
     pub consecutive_transport_failures: u32,
     pub transport_error_kind: Option<String>,
+    pub poll_statistics: PollStatistics,
     pub primary_device: Option<IntegrationDevice>,
     pub devices: Vec<IntegrationDevice>,
 }
@@ -57,6 +58,7 @@ impl IntegrationSnapshot {
             transport_healthy: snapshot.transport_healthy,
             consecutive_transport_failures: snapshot.consecutive_transport_failures,
             transport_error_kind: snapshot.transport_error_kind.clone(),
+            poll_statistics: snapshot.poll_statistics.clone(),
             primary_device: snapshot
                 .primary_device
                 .as_ref()
@@ -77,7 +79,7 @@ impl IntegrationSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontend::{FrontendDeviceState, FrontendSnapshot};
+    use crate::frontend::{FrontendDeviceState, FrontendSnapshot, PollStatistics};
     use crate::state::DeviceType;
 
     #[test]
@@ -100,6 +102,13 @@ mod tests {
             transport_healthy: true,
             consecutive_transport_failures: 0,
             transport_error_kind: None,
+            poll_statistics: PollStatistics {
+                attempts: 10,
+                successes: 9,
+                failures: 1,
+                last_duration_ms: Some(500),
+                ..PollStatistics::default()
+            },
         };
 
         let json = IntegrationSnapshot::from_frontend(&snapshot)
@@ -111,6 +120,8 @@ mod tests {
         assert!(json.contains(r#""transportName":"scripted""#));
         assert!(json.contains(r#""transportReady":true"#));
         assert!(json.contains(r#""transportErrorKind":null"#));
+        assert!(json.contains(r#""pollStatistics":{"attempts":10"#));
+        assert!(json.contains(r#""lastDurationMs":500"#));
         assert!(json.contains(r#""deviceType":"mouse""#));
         assert!(json.contains(r#""productId":171"#));
         assert!(!json.contains("serial"));

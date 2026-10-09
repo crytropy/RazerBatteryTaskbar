@@ -16,7 +16,7 @@ use notify_rust::{Notification, Urgency};
 use polling::{CoreUpdate, CoreWorker};
 #[cfg(windows)]
 use power_events::PowerNotifications;
-use razer_core::frontend::FrontendSnapshot;
+use razer_core::frontend::{FrontendSnapshot, PollStatistics};
 use razer_core::notifications::{NotificationKind, NotificationRequest};
 use razer_core::settings::{AppSettings, SettingsStore};
 use razer_core::state::DeviceReading;
@@ -646,6 +646,7 @@ mod tests {
             transport_healthy: true,
             consecutive_transport_failures: 0,
             transport_error_kind: None,
+            poll_statistics: PollStatistics::default(),
         };
 
         assert_eq!(
@@ -664,6 +665,7 @@ mod tests {
             transport_healthy: false,
             consecutive_transport_failures: 2,
             transport_error_kind: None,
+            poll_statistics: PollStatistics::default(),
         };
 
         assert!(format_status(&snapshot).contains("2 consecutive failures"));

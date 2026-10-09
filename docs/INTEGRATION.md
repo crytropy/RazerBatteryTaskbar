@@ -18,6 +18,14 @@ Example:
   "transportHealthy": true,
   "consecutiveTransportFailures": 0,
   "transportErrorKind": null,
+  "pollStatistics": {
+    "attempts": 10,
+    "successes": 9,
+    "failures": 1,
+    "lastSuccessfulScanUnixMs": 1791500000000,
+    "lastBatteryReadUnixMs": 1791500000000,
+    "lastDurationMs": 501
+  },
   "primaryDevice": {
     "vendorId": 5426,
     "productId": 171,
@@ -108,3 +116,21 @@ receiver instead reports `connected=false`. No raw Windows error messages,
 serials, or device paths cross this JSON boundary.
 
 The public schema remains version 1 because this new field is additive.
+
+
+## Polling statistics
+
+The top-level `pollStatistics` object contains session-local read counters,
+reset whenever the native tray process starts:
+
+- `attempts`: calls into the selected transport;
+- `successes`: transport reads which returned without an error, even if no receiver was present;
+- `failures`: transport reads that returned an error;
+- `lastSuccessfulScanUnixMs`: timestamp of the most recent successful device scan;
+- `lastBatteryReadUnixMs`: timestamp of the most recent successful scan which returned a battery percentage;
+- `lastDurationMs`: elapsed time for the most recent attempt, including any HID report response delay.
+
+Times are UTC Unix epoch milliseconds. Timestamps are `null` until that event
+occurs. Counts reset on application restart and are not persisted to disk.
+The fields help distinguish a receiver that periodically fails to return
+battery data from a receiver that has not been seen after sleep.

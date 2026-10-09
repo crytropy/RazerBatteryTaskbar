@@ -119,12 +119,11 @@ mod tests {
 
     #[test]
     fn startup_command_quotes_paths_with_spaces() {
-        let command =
-            build_startup_command(
-                Path::new(r"C:\Program Files\RazerBattery\razer-tray.exe"),
-                false,
-            )
-            .unwrap();
+        let command = build_startup_command(
+            Path::new(r"C:\Program Files\RazerBattery\razer-tray.exe"),
+            false,
+        )
+        .unwrap();
 
         assert_eq!(command, r#""C:\Program Files\RazerBattery\razer-tray.exe""#);
     }
@@ -135,7 +134,10 @@ mod tests {
         let default = build_startup_command(executable, false).unwrap();
         let experimental = build_startup_command(executable, true).unwrap();
 
-        assert_eq!(default, r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe""#);
+        assert_eq!(
+            default,
+            r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe""#
+        );
         assert_eq!(
             experimental,
             r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe" --experimental-hid-00b7"#

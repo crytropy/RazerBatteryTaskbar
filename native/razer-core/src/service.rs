@@ -1,6 +1,8 @@
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
 use crate::diagnostics::DiagnosticsSnapshot;
 use crate::events::DeviceEvent;
-use crate::frontend::{FrontendDeviceState, FrontendSnapshot};
+use crate::frontend::{FrontendDeviceState, FrontendSnapshot, PollStatistics};
 use crate::manager::DeviceManager;
 use crate::settings::PrimaryDevicePreference;
 use crate::state::DeviceState;
@@ -25,6 +27,7 @@ pub struct CoreService<T: BatteryTransport> {
     consecutive_transport_failures: u32,
     last_transport_error: Option<String>,
     last_transport_error_kind: Option<TransportErrorKind>,
+    poll_statistics: PollStatistics,
 }
 
 impl<T: BatteryTransport> CoreService<T> {
@@ -46,18 +49,36 @@ impl<T: BatteryTransport> CoreService<T> {
             consecutive_transport_failures: 0,
             last_transport_error: None,
             last_transport_error_kind: None,
+            poll_statistics: PollStatistics::default(),
         }
     }
 
     pub fn refresh(&mut self) -> RefreshSnapshot {
-        let (events, transport_error) = match self.transport.read_devices() {
+        let started = Instant::now();
+        let reading = self.transport.read_devices();
+        self.poll_statistics.attempts = self.poll_statistics.attempts.saturating_add(1);
+        self.poll_statistics.last_duration_ms =
+            Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+
+        let (events, transport_error) = match reading {
             Ok(readings) => {
+                self.poll_statistics.successes =
+                    self.poll_statistics.successes.saturating_add(1);
+                let now_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .and_then(|duration| u64::try_from(duration.as_millis()).ok());
+                self.poll_statistics.last_successful_scan_unix_ms = now_ms;
+                if readings.iter().any(|reading| reading.battery.is_some()) {
+                    self.poll_statistics.last_battery_read_unix_ms = now_ms;
+                }
                 self.consecutive_transport_failures = 0;
                 self.last_transport_error = None;
                 self.last_transport_error_kind = None;
                 (self.manager.update_from_readings(readings), None)
             }
             Err(error) => {
+                self.poll_statistics.failures = self.poll_statistics.failures.saturating_add(1);
                 self.consecutive_transport_failures += 1;
                 let message = error.to_string();
                 self.last_transport_error = Some(message.clone());
@@ -127,6 +148,7 @@ impl<T: BatteryTransport> CoreService<T> {
             transport_error_kind: self
                 .last_transport_error_kind
                 .map(|kind| kind.as_str().to_string()),
+            poll_statistics: self.poll_statistics.clone(),
         }
     }
 
@@ -369,6 +391,47 @@ mod tests {
         assert!(recovered.devices[0].connected);
         assert_eq!(recovered.consecutive_transport_failures, 0);
         assert_eq!(service.frontend_snapshot().transport_error_kind, None);
+    }
+
+    #[test]
+    fn session_poll_telemetry_counts_successes_failures_and_recovery() {
+        let transport = ScriptedTransport::new(vec![
+            Ok(vec![mouse_reading(78.0)]),
+            Err(TransportError::with_kind(
+                TransportErrorKind::Receive,
+                "simulated read failure",
+            )),
+            Ok(Vec::new()),
+        ]);
+        let mut service = CoreService::new(transport);
+        assert_eq!(service.frontend_snapshot().poll_statistics.attempts, 0);
+
+        service.refresh();
+        let first = service.frontend_snapshot().poll_statistics;
+        assert_eq!((first.attempts, first.successes, first.failures), (1, 1, 0));
+        assert!(first.last_successful_scan_unix_ms.is_some());
+        assert!(first.last_battery_read_unix_ms.is_some());
+        assert!(first.last_duration_ms.is_some());
+
+        service.refresh();
+        let failed = service.frontend_snapshot().poll_statistics;
+        assert_eq!((failed.attempts, failed.successes, failed.failures), (2, 1, 1));
+        assert_eq!(
+            failed.last_battery_read_unix_ms,
+            first.last_battery_read_unix_ms
+        );
+
+        service.refresh();
+        let recovered = service.frontend_snapshot().poll_statistics;
+        assert_eq!(
+            (recovered.attempts, recovered.successes, recovered.failures),
+            (3, 2, 1)
+        );
+        assert!(recovered.last_successful_scan_unix_ms.is_some());
+        assert_eq!(
+            recovered.last_battery_read_unix_ms,
+            first.last_battery_read_unix_ms
+        );
     }
 
     #[test]

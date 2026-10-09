@@ -208,3 +208,18 @@ No global experimental-HID setting or automatic mode migration is added.
 A copied/moved executable may require the startup toggle to be re-enabled
 to update the registered path. The executable should be kept in its
 permanent location before enabling startup.
+
+
+## Monitoring prolonged battery polling
+
+`CoreService` now includes privacy-safe per-process poll counters and
+timestamp fields, exposed by `GET /v1/status` in `pollStatistics`.
+They record total attempts, successful/failed transport reads, the
+most recent successful scan, the most recent scan that returned
+battery data, and the most recent read duration. No persistent
+telemetry log, third-party network request, serial number, or
+HID path is introduced.
+
+After confirming that the experimental 00B7 transport can poll correctly,
+use the read-only local status endpoint to watch success/failure counts over
+a longer session. The counters reset when the EXE is restarted.

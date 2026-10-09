@@ -177,3 +177,21 @@ For a reconnect test, keep the experimental tray running, disconnect the
 00B7 receiver, inspect `/v1/status`, reconnect the receiver, and confirm
 `connected=true`, `transportHealthy=true` and an up-to-date battery value.
 Do not substitute driver changes for an inaccessible HID interface.
+
+
+## Session-level polling health checks
+
+The Native Preview exposes `pollStatistics` in its read-only local API.
+With the experimental transport running:
+
+```powershell
+(Invoke-RestMethod http://127.0.0.1:27212/v1/status).pollStatistics
+```
+
+Allow the tray to run normally for a longer session. The counter
+`attempts` should increase as refreshes occur, while `failures`
+should remain low. A `success` means that transport enumeration and its
+request completed, but it can also mean a successful empty-device scan.
+`lastBatteryReadUnixMs` is the better indicator that an actual battery
+percentage was returned. Report timestamps are UTC milliseconds since
+Unix epoch. Telemetry is session-only and excludes serials and HID paths.
