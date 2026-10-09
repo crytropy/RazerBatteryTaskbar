@@ -50,3 +50,19 @@ handle or emits a feature report.
 The native transport will only be enabled after identifying usable HID
 collections and checking that active polling does not interfere with Synapse.
 No driver changes are part of this process.
+
+## Verified candidate for 1532:00B7
+
+User HID enumeration found the stock DeathAdder V3 Pro receiver reporting
+`MI_00 / usage_page=0001 / usage=0002`, among 12 HID collections.
+An independent OpenMouse hardware test reports successful status reads
+over this same collection on a DeathAdder V3 Pro receiver with Synapse
+fully closed. Microsoft documents Generic Desktop Mouse top-level
+collections as system-exclusive, so this is **not** evidence that
+simultaneous Synapse access is safe.
+
+The dedicated `battery-once` example is **not** the production
+transport. It explicitly requires one command-line flag, matches only
+PID `00B7`, sends a single battery query, and fails closed on ambiguous
+candidates or invalid reply frames. This may still be blocked by
+Windows HID ownership; drivers will not be replaced to work around it.

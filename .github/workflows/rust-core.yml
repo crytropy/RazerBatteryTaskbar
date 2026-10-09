@@ -135,3 +135,49 @@ jobs:
           name: RazerBatteryTaskbar-HID-Probe
           path: dist/hid-probe/*
           if-no-files-found: error
+
+      - name: Build one-shot battery test (separate executable)
+        run: cargo build -p razer-core --example battery-once --features windows-hid --release
+
+      - name: Prepare one-shot battery test artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "dist/battery-once" -Force | Out-Null
+
+          $exe = "dist/battery-once/RazerBatteryTaskbar-Battery-Once-Test.exe"
+          Copy-Item "target/release/examples/battery-once.exe" $exe -Force
+
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  RazerBatteryTaskbar-Battery-Once-Test.exe" |
+            Set-Content "dist/battery-once/SHA256SUMS.txt" -Encoding ascii
+
+          @"
+          RazerBatteryTaskbar Battery Once Test
+
+          Commit: $env:GITHUB_SHA
+          EXPERIMENTAL HARDWARE DIAGNOSTIC — NOT A NORMAL APP BUILD.
+
+          Scope: Razer DeathAdder V3 Pro stock receiver (VID 1532, PID 00B7),
+          HID MI_00, usage page 0001 / usage 0002 only.
+
+          This tool opens one HID handle and sends exactly one battery query
+          using SetFeature/GetFeature. It DOES NOT modify mouse settings or
+          change Windows drivers. It may fail when Synapse owns the interface.
+          Close Synapse and all Razer background services for the initial test.
+
+          It runs no HID operation without the explicit command-line flag.
+
+          In PowerShell:
+            .\RazerBatteryTaskbar-Battery-Once-Test.exe --help
+            .\RazerBatteryTaskbar-Battery-Once-Test.exe --read-battery-once
+
+          The native tray remains on placeholder transport until the result
+          is physically verified and Synapse coexistence is evaluated.
+          "@ | Set-Content "dist/battery-once/README-BATTERY-TEST.txt" -Encoding utf8
+
+      - name: Upload one-shot battery test
+        uses: actions/upload-artifact@v4
+        with:
+          name: RazerBatteryTaskbar-Battery-Once-Test
+          path: dist/battery-once/*
+          if-no-files-found: error

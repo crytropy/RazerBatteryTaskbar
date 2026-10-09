@@ -85,3 +85,44 @@ the exit code and Windows Event Viewer may provide additional clues.
 
 The launcher does not request elevation, change drivers, open device
 handles or send feature reports.
+
+## DeathAdder V3 Pro receiver: first battery query
+
+The user-provided HID enumeration for VID `1532`, PID `00B7` showed
+12 collections. The most promising candidate is `interface 0`,
+`usage_page=0001`, `usage=0002` (Generic Desktop Mouse).
+
+This agrees with [OpenMouse's documented DeathAdder V3 Pro receiver
+hardware test](https://github.com/OpenMouse-Project/mouse-protocol/blob/main/docs/razer-testing.md):
+the separate `MI_00` mouse collection responded to the Razer status
+protocol, tested with Synapse and all Razer services quit. The test does
+not establish coexistence with Synapse.
+
+The `RazerBatteryTaskbar-Battery-Once-Test` GitHub Actions artifact is an
+**experimental, opt-in, separate executable**. It is NOT part of the
+ordinary read-only HID enumeration probe or the native tray.
+
+It accepts only `--read-battery-once` and will:
+
+1. Require the exact PID/interface/usage combination `00B7 / MI_00 / 0001:0002`.
+2. Refuse to proceed if the matching collection is missing or ambiguous.
+3. Open one HID handle, send one Razer battery query using
+   SetFeature/GetFeature, validate reply status/transaction/command/checksum,
+   and report the resulting battery percentage.
+4. Exit without changing DPI, polling rate, device settings, or drivers.
+
+**SetFeature is a device command, even though this query asks only for
+battery state.** The safer enumeration-only probe never sends such a
+command; this separate diagnostic intentionally does so only after you
+explicitly pass the flag. Keep the mouse connected and do the first test
+with Synapse and other Razer services completely closed.
+
+```powershell
+.\RazerBatteryTaskbar-Battery-Once-Test.exe --help
+.\RazerBatteryTaskbar-Battery-Once-Test.exe --read-battery-once
+```
+
+Record the displayed battery percentage or exact error. Do not switch
+to native continuous polling based solely on one successful query:
+retry consistency, disconnect/reconnect, and Synapse coexistence all
+still need validation.
