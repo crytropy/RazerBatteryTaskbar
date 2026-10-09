@@ -69,9 +69,19 @@ jobs:
           protection, and read-only local integration API are implemented.
 
           IMPORTANT:
-          The real Razer HID battery transport is not enabled yet. This preview
-          intentionally uses the placeholder transport until physical-device HID
-          validation is complete, so it will not report real battery values yet.
+          Default startup still uses the placeholder transport and cannot
+          read battery values. A one-shot query on a real 1532:00B7 device
+          has succeeded, but sustained polling and Synapse coexistence
+          are not verified.
+
+          Experimental opt-in (after closing Synapse and Razer services):
+            .\RazerBatteryTaskbar-Native-Preview.exe --experimental-hid-00b7
+
+          The experimental profile targets only DeathAdder V3 Pro receiver
+          1532:00B7, MI_00, usage 0001:0002. It sends one battery query
+          every 60 seconds or longer, reopens/releases its HID handle
+          per read, and may fail when Windows or Synapse owns the interface.
+          The tray will never auto-enable experimental HID on startup.
 
           Integration endpoint:
           http://127.0.0.1:27212/v1/status

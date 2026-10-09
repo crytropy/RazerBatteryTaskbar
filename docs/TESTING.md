@@ -126,3 +126,35 @@ Record the displayed battery percentage or exact error. Do not switch
 to native continuous polling based solely on one successful query:
 retry consistency, disconnect/reconnect, and Synapse coexistence all
 still need validation.
+
+## Experimental Native Tray validation — 00B7 only
+
+A one-shot query on the user's device succeeded and returned `Battery: 78.8%`
+with a verified acknowledgement and checksum.
+
+The Rust Native Preview now has a separately enabled continuous polling
+profile. With Synapse and Razer background services closed, launch:
+
+```powershell
+.\RazerBatteryTaskbar-Native-Preview.exe --experimental-hid-00b7
+```
+
+Check the tray battery percentage and the versioned status JSON:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:27212/v1/status |
+    ConvertTo-Json -Depth 5
+```
+
+Look for `transportName=windows-hid-00b7-experimental`,
+`transportReady=true` and `transportHealthy=true`. Repeat at intervals
+longer than 60 seconds; then test disconnection/reconnection. After stable
+operation with Synapse closed, test Synapse coexistence separately. If the
+mouse stops responding or the transport becomes unhealthy, quit the
+native tray and return to the normal compatibility version. Never
+replace the Windows/Razer driver as a workaround.
+
+**Known limitation:** the experimental HID read runs synchronously on
+the native tray event thread and waits about 500 ms for a reply.
+This is appropriate for the first opt-in proof of concept only, not a
+completed production polling architecture.

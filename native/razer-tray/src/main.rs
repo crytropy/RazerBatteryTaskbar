@@ -17,6 +17,8 @@ use razer_core::service::CoreService;
 use razer_core::settings::{AppSettings, SettingsStore};
 use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
+#[cfg(windows)]
+use razer_core::windows_hid::ExperimentalDeathAdderTransport;
 use settings_menu::SettingsMenu;
 use single_instance::SingleInstance;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
@@ -27,6 +29,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::WindowId;
 
 const INSTANCE_NAME: &str = "RazerBatteryTaskbar.Native.Tray";
+const MIN_EXPERIMENTAL_POLL_SECONDS: u64 = 60;
 
 #[derive(Debug)]
 enum UserEvent {
@@ -50,8 +53,41 @@ impl BatteryTransport for PlaceholderTransport {
     }
 }
 
+enum AppTransport {
+    Placeholder(PlaceholderTransport),
+    #[cfg(windows)]
+    Experimental(ExperimentalDeathAdderTransport),
+}
+
+impl BatteryTransport for AppTransport {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Placeholder(transport) => transport.name(),
+            #[cfg(windows)]
+            Self::Experimental(transport) => transport.name(),
+        }
+    }
+
+    fn is_ready(&self) -> bool {
+        match self {
+            Self::Placeholder(transport) => transport.is_ready(),
+            #[cfg(windows)]
+            Self::Experimental(transport) => transport.is_ready(),
+        }
+    }
+
+    fn read_devices(&mut self) -> Result<Vec<DeviceReading>, TransportError> {
+        match self {
+            Self::Placeholder(transport) => transport.read_devices(),
+            #[cfg(windows)]
+            Self::Experimental(transport) => transport.read_devices(),
+        }
+    }
+}
+
 struct TrayApplication {
-    core: CoreService<PlaceholderTransport>,
+    core: CoreService<AppTransport>,
+    experimental_hid: bool,
     settings_store: Option<SettingsStore>,
     settings: AppSettings,
     integration_state: SharedIntegrationState,
@@ -69,12 +105,15 @@ impl TrayApplication {
         settings: AppSettings,
         integration_state: SharedIntegrationState,
         poll_scheduler: PollScheduler,
+        transport: AppTransport,
+        experimental_hid: bool,
     ) -> Self {
-        let mut core = CoreService::new(PlaceholderTransport);
+        let mut core = CoreService::new(transport);
         core.set_primary_device_preference(settings.primary_device.clone());
 
         Self {
             core,
+            experimental_hid,
             settings_store,
             settings,
             integration_state,
@@ -90,7 +129,7 @@ impl TrayApplication {
     fn create_tray(&mut self) -> Result<(), Box<dyn Error>> {
         let menu = Menu::new();
         let status_item = MenuItem::new("Starting native core…", false, None);
-        let settings_menu = SettingsMenu::new(&self.settings)?;
+        let settings_menu = SettingsMenu::new(&self.settings, self.experimental_hid)?;
         let refresh_item = MenuItem::with_id("refresh", "Refresh", true, None);
         let quit_item = MenuItem::with_id("quit", "Quit", true, None);
 
@@ -168,6 +207,10 @@ impl TrayApplication {
     }
 
     fn set_poll_interval(&mut self, seconds: u64) {
+        if self.experimental_hid && seconds < MIN_EXPERIMENTAL_POLL_SECONDS {
+            return;
+        }
+
         self.settings.poll_interval_seconds = seconds;
         self.sync_settings_menu();
         self.persist_settings("poll interval");
@@ -384,6 +427,13 @@ fn format_status(snapshot: &FrontendSnapshot) -> String {
         return "Native shell ready — HID transport pending".to_string();
     }
 
+    if !snapshot.transport_healthy {
+        return format!(
+            "HID battery read failed ({} consecutive failures)",
+            snapshot.consecutive_transport_failures
+        );
+    }
+
     match snapshot.primary_device.as_ref() {
         Some(device) if device.connected => match device.battery {
             Some(battery) => format!(
@@ -439,6 +489,20 @@ fn build_battery_icon(battery: Option<f32>) -> Result<Icon, tray_icon::BadIcon> 
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let experimental_hid = match args.as_slice() {
+        [] => false,
+        [option] if option == "--experimental-hid-00b7" => true,
+        [option] if option == "--help" || option == "-h" => {
+            println!("RazerBatteryTaskbar Native Preview");
+            println!("Usage: razer-tray.exe [--experimental-hid-00b7]");
+            println!("Experimental HID mode is for DeathAdder V3 Pro receiver 1532:00B7 only.");
+            println!("Close Razer Synapse for the initial repeated-read test.");
+            return Ok(());
+        }
+        _ => return Err("invalid arguments: use --help to see supported options".into()),
+    };
+
     let instance_guard = SingleInstance::new(INSTANCE_NAME)?;
 
     if !instance_guard.is_single() {
@@ -447,6 +511,27 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (settings_store, mut settings) = load_settings();
     reconcile_startup_setting(settings_store.as_ref(), &mut settings);
+
+    // Do not write the experimental minimum into the user's persistent settings.
+    if experimental_hid {
+        settings.poll_interval_seconds = settings
+            .poll_interval_seconds
+            .max(MIN_EXPERIMENTAL_POLL_SECONDS);
+    }
+
+    let transport = if experimental_hid {
+        #[cfg(windows)]
+        {
+            AppTransport::Experimental(ExperimentalDeathAdderTransport::new())
+        }
+        #[cfg(not(windows))]
+        {
+            return Err("experimental HID transport requires Windows".into());
+        }
+    } else {
+        AppTransport::Placeholder(PlaceholderTransport)
+    };
+
     let initial_poll_interval = Duration::from_secs(settings.poll_interval_seconds);
 
     let integration_state = api::initial_state();
@@ -474,8 +559,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         tick_proxy.send_event(UserEvent::Tick).is_ok()
     });
 
-    let mut application =
-        TrayApplication::new(settings_store, settings, integration_state, poll_scheduler);
+    let mut application = TrayApplication::new(
+        settings_store,
+        settings,
+        integration_state,
+        poll_scheduler,
+        transport,
+        experimental_hid,
+    );
     event_loop.run_app(&mut application)?;
     drop(instance_guard);
 
@@ -501,6 +592,20 @@ mod tests {
             format_status(&snapshot),
             "Native shell ready — HID transport pending"
         );
+    }
+
+    #[test]
+    fn failed_transport_state_does_not_display_stale_battery() {
+        let snapshot = FrontendSnapshot {
+            devices: Vec::new(),
+            primary_device: None,
+            transport_name: "windows-hid-00b7-experimental".to_string(),
+            transport_ready: true,
+            transport_healthy: false,
+            consecutive_transport_failures: 2,
+        };
+
+        assert!(format_status(&snapshot).contains("2 consecutive failures"));
     }
 
     #[test]

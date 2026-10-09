@@ -32,7 +32,7 @@ pub struct SettingsMenu {
 }
 
 impl SettingsMenu {
-    pub fn new(settings: &AppSettings) -> Result<Self, Box<dyn Error>> {
+    pub fn new(settings: &AppSettings, experimental_hid: bool) -> Result<Self, Box<dyn Error>> {
         let root = Submenu::with_id("settings", "Settings", true);
 
         let notifications_item = CheckMenuItem::with_id(
@@ -99,7 +99,7 @@ impl SettingsMenu {
                 let item = CheckMenuItem::with_id(
                     format!("settings.poll-interval.{seconds}"),
                     label,
-                    true,
+                    !experimental_hid || *seconds >= 60,
                     settings.poll_interval_seconds == *seconds,
                     None,
                 );

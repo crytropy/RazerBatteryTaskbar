@@ -20,7 +20,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 4 | Move supported hardware into a maintainable device database | Complete |
 | 5 | Add multi-device support | Complete |
 | 6 | Add a device event system | Complete |
-| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | 00B7 MI_00 candidate identified; one-shot read test prepared, hardware confirmation pending |
+| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | One-shot 00B7 battery read succeeded; 60-second opt-in native polling awaiting validation |
 | 8 | Move the stable core to Rust | Core contracts migrated |
 | 9 | Build the lightweight Windows tray frontend | Shell + startup + single-instance compiling |
 | 10 | Add persistent settings | Core/persistence + tray polling/threshold controls + primary preference wiring complete |
@@ -35,6 +35,8 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 The Electron application remains the usable compatibility runtime while the Rust/native implementation is developed in parallel.
 
 The Rust core contains protocol handling, the shared device database, normalized state, multi-device management, events, transport abstraction, the core service, privacy-safe frontend snapshots, a versioned integration JSON contract, persistent settings, and notification policy.
+
+The experimental `windows-hid-00b7-experimental` transport can be explicitly enabled with `--experimental-hid-00b7`. Normal startup remains on the placeholder transport until repeated-read, reconnect, and Synapse coexistence testing is complete.
 
 The native tray shell lives in `native/razer-tray`. It owns the Windows event loop, system tray icon/menu, runtime-adjustable refresh scheduling, settings persistence integration, notification threshold controls, Windows notification adapter, per-user startup registration, single-instance protection, and a read-only loopback status API, but deliberately uses a placeholder transport until HID hardware validation is complete.
 

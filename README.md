@@ -36,7 +36,15 @@ The Rust/native tray is already able to run as a lightweight Windows tray applic
 - read-only local integration API;
 - optional Seelen UI adapter.
 
-**The real native HID battery transport is not enabled yet.** The Native Preview deliberately uses a placeholder transport until physical-device HID validation is complete, so it will not report real Razer battery values yet.
+**Default startup still uses the placeholder transport.** A one-shot battery read succeeded on a real DeathAdder V3 Pro receiver (1532:00B7), and an **experimental opt-in** transport can now query this specific device. Other hardware is not enabled, and sustained polling/Synapse coexistence are not verified yet.
+
+After extracting the Native Preview artifact, close Synapse and Razer services before trying:
+
+```powershell
+.\RazerBatteryTaskbar-Native-Preview.exe --experimental-hid-00b7
+```
+
+This mode sends a battery query on launch and at least 60 seconds apart. Running the EXE without arguments remains placeholder-only. Consult [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md) before using it.
 
 The latest preview is available from the **Rust Native Preview** workflow artifacts:
 

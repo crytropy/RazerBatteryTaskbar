@@ -91,3 +91,36 @@ The Electron `Development Build` remains the usable compatibility build until na
 The HID Probe supports `--json` for structured reports, `--pid 0xNNNN` for a
 specific model, and `--known-only` to filter by the shared product database.
 See [Windows hardware verification](TESTING.md).
+
+## Experimental 00B7 native HID (explicit opt-in)
+
+An actual one-shot HID battery query succeeded on a DeathAdder V3 Pro receiver:
+`VID=1532 PID=00B7`, `MI_00`, usage page `0001`, usage `0002`.
+The Razer reply acknowledged the command, passed transaction and checksum
+checks, and returned 78.8%. This validates **one real device/query only**;
+it does not establish long-term polling stability or Synapse coexistence.
+
+Default startup continues to use `PlaceholderTransport`.
+
+To opt in from PowerShell after quitting Synapse and Razer services:
+
+```powershell
+.\RazerBatteryTaskbar-Native-Preview.exe --experimental-hid-00b7
+```
+
+Experimental mode uses `windows-hid-00b7-experimental`, attempts only this
+specific product/interface/usage combination, and sends a battery query on
+launch and at intervals of **at least 60 seconds**. The 5/15/30-second
+poll options are disabled while it is active; the minimum is enforced
+regardless of earlier saved settings. It opens a handle for a single query
+then releases it, and does not change the Windows driver or mouse settings.
+
+It will stop reporting a stale reading when transport health fails,
+and will mark the device disconnected after the core's existing three-failure
+threshold. The local API reports `transportName`, `transportReady`,
+`transportHealthy`, and battery state so that external consumers can
+tell experimental reads from the normal placeholder mode.
+
+The original Electron compatibility build remains the recommended
+everyday version until reconnect, repeated polling, and Synapse
+coexistence pass real-device testing.
