@@ -16,7 +16,9 @@ use notify_rust::{Notification, Urgency};
 use polling::{CoreUpdate, CoreWorker};
 #[cfg(windows)]
 use power_events::PowerNotifications;
-use razer_core::frontend::{FrontendSnapshot, PollStatistics};
+use razer_core::frontend::FrontendSnapshot;
+#[cfg(test)]
+use razer_core::frontend::PollStatistics;
 use razer_core::notifications::{NotificationKind, NotificationRequest};
 use razer_core::settings::{AppSettings, SettingsStore};
 use razer_core::state::DeviceReading;
