@@ -94,6 +94,7 @@ jobs:
 
           $exe = "dist/hid-probe/RazerBatteryTaskbar-HID-Probe.exe"
           Copy-Item "target/release/examples/hid-probe.exe" $exe -Force
+          Copy-Item "scripts/Run-HID-Probe.cmd" "dist/hid-probe/Run-HID-Probe.cmd" -Force
 
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  RazerBatteryTaskbar-HID-Probe.exe" |
@@ -110,7 +111,11 @@ jobs:
           It does not open HID device handles, modify device state,
           or send any Razer feature reports.
 
-          Run from PowerShell:
+          Recommended: double-click Run-HID-Probe.cmd after extracting the ZIP.
+          The launcher keeps the window open and saves razer-hid-report.json
+          and razer-hid-errors.txt (remove the spaces in the filenames).
+
+          Or run from PowerShell:
             .\RazerBatteryTaskbar-HID-Probe.exe
             .\RazerBatteryTaskbar-HID-Probe.exe --json
             .\RazerBatteryTaskbar-HID-Probe.exe --pid 0x00AB

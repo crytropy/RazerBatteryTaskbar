@@ -69,3 +69,19 @@ in the shared database; it does not prove that the HID battery protocol works.
 Treat these observations as interface-discovery data, not final evidence of
 compatibility. A later physical-device protocol test is required before any
 native feature-report requests are enabled.
+
+## Double-click troubleshooting launcher
+
+The ZIP artifact includes `Run-HID-Probe.cmd` next to the executable.
+Extract the entire ZIP before running the launcher. Double-clicking the
+`.exe` directly opens a console that can close as soon as the probe exits,
+even when enumeration succeeds.
+
+The launcher runs `--json`, keeps the command window open, shows the exit
+code, and saves `razer-hid-report.json` and `razer-hid-errors.txt` beside
+the executable. Share the **exit code** and error log if the probe fails.
+If Windows blocks the process or terminates it before producing any output,
+the exit code and Windows Event Viewer may provide additional clues.
+
+The launcher does not request elevation, change drivers, open device
+handles or send feature reports.
