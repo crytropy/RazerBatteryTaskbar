@@ -104,7 +104,7 @@ impl Drop for PowerNotifications {
         // SAFETY: the handle came from a successful registration. Unregister
         // before freeing the callback state so Windows cannot use freed memory.
         unsafe {
-            let _ = PowerUnregisterSuspendResumeNotification(self.registration);
+            let _ = PowerUnregisterSuspendResumeNotification(self.registration as isize);
             drop(Box::from_raw(self.context));
         }
     }
