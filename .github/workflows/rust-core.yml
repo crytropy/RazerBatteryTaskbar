@@ -81,7 +81,10 @@ jobs:
           1532:00B7, MI_00, usage 0001:0002. It sends one battery query
           every 60 seconds or longer, reopens/releases its HID handle
           per read, and may fail when Windows or Synapse owns the interface.
-          The tray will never auto-enable experimental HID on startup.
+          Experimental HID will not auto-enable by default.
+          If the user explicitly enables Start with Windows while running
+          the opt-in mode, that same flag is preserved at login.
+          Keep this EXE in a permanent location before enabling startup.
 
           Integration endpoint:
           http://127.0.0.1:27212/v1/status

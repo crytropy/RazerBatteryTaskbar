@@ -270,7 +270,7 @@ impl TrayApplication {
     fn toggle_start_with_windows(&mut self) {
         let next = !self.settings.start_with_windows;
 
-        match startup::set_enabled(next) {
+        match startup::set_enabled(next, self.experimental_hid) {
             Ok(()) => {
                 self.settings.start_with_windows = next;
                 self.sync_settings_menu();
@@ -400,8 +400,12 @@ fn load_settings() -> (Option<SettingsStore>, AppSettings) {
     }
 }
 
-fn reconcile_startup_setting(store: Option<&SettingsStore>, settings: &mut AppSettings) {
-    match startup::is_enabled() {
+fn reconcile_startup_setting(
+    store: Option<&SettingsStore>,
+    settings: &mut AppSettings,
+    experimental_hid: bool,
+) {
+    match startup::is_enabled(experimental_hid) {
         Ok(enabled) if enabled != settings.start_with_windows => {
             settings.start_with_windows = enabled;
 
@@ -537,7 +541,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let (settings_store, mut settings) = load_settings();
-    reconcile_startup_setting(settings_store.as_ref(), &mut settings);
+    reconcile_startup_setting(settings_store.as_ref(), &mut settings, experimental_hid);
 
     // Do not write the experimental minimum into the user's persistent settings.
     if experimental_hid {

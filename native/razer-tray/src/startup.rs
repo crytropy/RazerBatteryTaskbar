@@ -50,8 +50,14 @@ impl From<io::Error> for StartupError {
     }
 }
 
-pub fn build_startup_command(executable: &Path) -> Result<String, StartupError> {
-    let command = format!("\"{}\"", executable.display());
+pub fn build_startup_command(
+    executable: &Path,
+    experimental_hid: bool,
+) -> Result<String, StartupError> {
+    let mut command = format!("\"{}\"", executable.display());
+    if experimental_hid {
+        command.push_str(" --experimental-hid-00b7");
+    }
     let length = command.encode_utf16().count();
 
     if length > MAX_RUN_COMMAND_CHARS {
@@ -62,10 +68,10 @@ pub fn build_startup_command(executable: &Path) -> Result<String, StartupError> 
 }
 
 #[cfg(windows)]
-pub fn is_enabled() -> Result<bool, StartupError> {
+pub fn is_enabled(experimental_hid: bool) -> Result<bool, StartupError> {
     use windows_registry::CURRENT_USER;
 
-    let expected = build_startup_command(&std::env::current_exe()?)?;
+    let expected = build_startup_command(&std::env::current_exe()?, experimental_hid)?;
     let key = match CURRENT_USER.open(RUN_KEY) {
         Ok(key) => key,
         Err(_) => return Ok(false),
@@ -78,12 +84,12 @@ pub fn is_enabled() -> Result<bool, StartupError> {
 }
 
 #[cfg(not(windows))]
-pub fn is_enabled() -> Result<bool, StartupError> {
+pub fn is_enabled(_experimental_hid: bool) -> Result<bool, StartupError> {
     Err(StartupError::UnsupportedPlatform)
 }
 
 #[cfg(windows)]
-pub fn set_enabled(enabled: bool) -> Result<(), StartupError> {
+pub fn set_enabled(enabled: bool, experimental_hid: bool) -> Result<(), StartupError> {
     use windows_registry::CURRENT_USER;
 
     let key = CURRENT_USER
@@ -91,7 +97,7 @@ pub fn set_enabled(enabled: bool) -> Result<(), StartupError> {
         .map_err(|error| StartupError::Registry(error.to_string()))?;
 
     if enabled {
-        let command = build_startup_command(&std::env::current_exe()?)?;
+        let command = build_startup_command(&std::env::current_exe()?, experimental_hid)?;
         key.set_string(VALUE_NAME, command)
             .map_err(|error| StartupError::Registry(error.to_string()))?;
     } else if key.get_string(VALUE_NAME).is_ok() {
@@ -103,7 +109,7 @@ pub fn set_enabled(enabled: bool) -> Result<(), StartupError> {
 }
 
 #[cfg(not(windows))]
-pub fn set_enabled(_enabled: bool) -> Result<(), StartupError> {
+pub fn set_enabled(_enabled: bool, _experimental_hid: bool) -> Result<(), StartupError> {
     Err(StartupError::UnsupportedPlatform)
 }
 
@@ -114,17 +120,43 @@ mod tests {
     #[test]
     fn startup_command_quotes_paths_with_spaces() {
         let command =
-            build_startup_command(Path::new(r"C:\Program Files\RazerBattery\razer-tray.exe"))
-                .unwrap();
+            build_startup_command(
+                Path::new(r"C:\Program Files\RazerBattery\razer-tray.exe"),
+                false,
+            )
+            .unwrap();
 
         assert_eq!(command, r#""C:\Program Files\RazerBattery\razer-tray.exe""#);
     }
 
     #[test]
+    fn startup_command_requires_explicit_opt_in_to_persist_experimental_hid() {
+        let executable = Path::new(r"C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe");
+        let default = build_startup_command(executable, false).unwrap();
+        let experimental = build_startup_command(executable, true).unwrap();
+
+        assert_eq!(default, r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe""#);
+        assert_eq!(
+            experimental,
+            r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe" --experimental-hid-00b7"#
+        );
+        assert!(!default.contains("--experimental-hid-00b7"));
+    }
+
+    #[test]
     fn startup_command_rejects_values_over_the_windows_run_limit() {
         let long_name = "a".repeat(MAX_RUN_COMMAND_CHARS + 1);
-        let error = build_startup_command(Path::new(&long_name)).unwrap_err();
+        let error = build_startup_command(Path::new(&long_name), false).unwrap_err();
 
         assert!(matches!(error, StartupError::CommandTooLong(_)));
+
+        // The opt-in flag counts toward the Windows command-line length.
+        let fits_without_flag = "a".repeat(MAX_RUN_COMMAND_CHARS - 2);
+        let executable = Path::new(&fits_without_flag);
+        assert!(build_startup_command(executable, false).is_ok());
+        assert!(matches!(
+            build_startup_command(executable, true),
+            Err(StartupError::CommandTooLong(_))
+        ));
     }
 }

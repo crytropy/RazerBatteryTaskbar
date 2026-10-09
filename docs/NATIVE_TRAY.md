@@ -189,3 +189,22 @@ This separation is particularly useful immediately after Windows wake, when
 the receiver's HID collection may be visible before feature reports succeed.
 It prevents displaying an old percentage as current or conflating read
 availability with physical USB attachment.
+
+
+## Start with Windows and the experimental HID flag
+
+The tray's **Start with Windows** toggle writes a per-user Windows Run
+entry for the current executable. It now preserves the launch mode:
+
+- Starting without arguments registers only the executable path;
+  the default placeholder mode remains the default after login.
+- Starting with `--experimental-hid-00b7` and explicitly enabling the
+  toggle registers the executable path **and the same opt-in flag**.
+  The next Windows login can therefore read 00B7 battery data.
+- Disabling the toggle removes the registration; changing launch modes
+  requires intentionally enabling startup again in the desired mode.
+
+No global experimental-HID setting or automatic mode migration is added.
+A copied/moved executable may require the startup toggle to be re-enabled
+to update the registered path. The executable should be kept in its
+permanent location before enabling startup.

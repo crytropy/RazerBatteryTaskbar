@@ -23,7 +23,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Read errors classified separately from receiver removal; resume/reconnect regression pending |
 | 8 | Move the stable core to Rust | Core contracts migrated |
 | 9 | Build the lightweight Windows tray frontend | Tray + single background core worker; Windows runtime verification ongoing |
-| 10 | Add persistent settings | Core/persistence + tray polling/threshold controls + primary preference wiring complete |
+| 10 | Add persistent settings | Core/persistence + tray polling/threshold controls + primary preference + startup mode preservation complete |
 | 11 | Add low/critical battery notifications | Policy + Windows adapter + manual test action complete; runtime verification pending |
 | 12 | Add an optional integration API/IPC boundary | Read-only loopback API + explicit transport readiness implemented |
 | 13 | Add optional Seelen UI integration | Fancy Toolbar adapter scaffold complete |
