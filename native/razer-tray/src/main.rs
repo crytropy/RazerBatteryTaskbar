@@ -454,7 +454,10 @@ fn format_status(snapshot: &FrontendSnapshot) -> String {
         return format!(
             "HID battery read failed ({} consecutive failures; {})",
             snapshot.consecutive_transport_failures,
-            snapshot.transport_error_kind.as_deref().unwrap_or("unknown")
+            snapshot
+                .transport_error_kind
+                .as_deref()
+                .unwrap_or("unknown")
         );
     }
 

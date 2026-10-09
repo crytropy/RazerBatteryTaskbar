@@ -36,33 +36,56 @@ impl Default for ExperimentalDeathAdderTransport {
 
 pub fn parse_feature_reply(bytes: &[u8], transaction_id: u8) -> Result<f32, TransportError> {
     if bytes.len() < REPORT_SIZE + 1 {
-        return Err(TransportError::with_kind(TransportErrorKind::InvalidResponse, "short HID feature response"));
+        return Err(TransportError::with_kind(
+            TransportErrorKind::InvalidResponse,
+            "short HID feature response",
+        ));
     }
 
     if bytes[0] != 0 {
-        return Err(TransportError::with_kind(TransportErrorKind::InvalidResponse, "unexpected HID report ID"));
+        return Err(TransportError::with_kind(
+            TransportErrorKind::InvalidResponse,
+            "unexpected HID report ID",
+        ));
     }
 
     let mut report = [0u8; REPORT_SIZE];
     report.copy_from_slice(&bytes[1..REPORT_SIZE + 1]);
 
     if report[0] != SUCCESS_STATUS {
-        return Err(TransportError::with_kind(TransportErrorKind::InvalidResponse, "Razer command did not report success"));
+        return Err(TransportError::with_kind(
+            TransportErrorKind::InvalidResponse,
+            "Razer command did not report success",
+        ));
     }
 
     if report[1] != transaction_id {
-        return Err(TransportError::with_kind(TransportErrorKind::InvalidResponse, "Razer transaction ID mismatch"));
+        return Err(TransportError::with_kind(
+            TransportErrorKind::InvalidResponse,
+            "Razer transaction ID mismatch",
+        ));
     }
 
     if report[6] != COMMAND_CLASS || report[7] != COMMAND_ID {
-        return Err(TransportError::with_kind(TransportErrorKind::InvalidResponse, "Razer response command mismatch"));
+        return Err(TransportError::with_kind(
+            TransportErrorKind::InvalidResponse,
+            "Razer response command mismatch",
+        ));
     }
 
     if calculate_crc(&report) != report[CRC_OFFSET] {
-        return Err(TransportError::with_kind(TransportErrorKind::InvalidResponse, "Razer response checksum mismatch"));
+        return Err(TransportError::with_kind(
+            TransportErrorKind::InvalidResponse,
+            "Razer response checksum mismatch",
+        ));
     }
 
-    parse_battery_level(&report).map_err(|_| TransportError::with_kind(TransportErrorKind::InvalidResponse, "battery level unavailable"))
+    parse_battery_level(&report).map_err(|_| {
+        TransportError::with_kind(
+            TransportErrorKind::InvalidResponse,
+            "battery level unavailable",
+        )
+    })
 }
 
 impl BatteryTransport for ExperimentalDeathAdderTransport {
@@ -71,8 +94,12 @@ impl BatteryTransport for ExperimentalDeathAdderTransport {
     }
 
     fn read_devices(&mut self) -> Result<Vec<DeviceReading>, TransportError> {
-        let api = HidApi::new()
-            .map_err(|_| TransportError::with_kind(TransportErrorKind::Enumeration, "unable to initialize Windows HID enumeration"))?;
+        let api = HidApi::new().map_err(|_| {
+            TransportError::with_kind(
+                TransportErrorKind::Enumeration,
+                "unable to initialize Windows HID enumeration",
+            )
+        })?;
 
         let mut candidates = api.device_list().filter(|device| {
             device.vendor_id() == RAZER_VENDOR_ID
@@ -87,29 +114,45 @@ impl BatteryTransport for ExperimentalDeathAdderTransport {
         };
 
         if candidates.next().is_some() {
-            return Err(TransportError::with_kind(TransportErrorKind::AmbiguousCollection, "more than one matching 00B7 HID collection; refusing ambiguous selection"));
+            return Err(TransportError::with_kind(
+                TransportErrorKind::AmbiguousCollection,
+                "more than one matching 00B7 HID collection; refusing ambiguous selection",
+            ));
         }
 
-        let product = get_product(PRODUCT_ID)
-            .ok_or_else(|| TransportError::with_kind(TransportErrorKind::Configuration, "00B7 missing from Razer device database"))?;
+        let product = get_product(PRODUCT_ID).ok_or_else(|| {
+            TransportError::with_kind(
+                TransportErrorKind::Configuration,
+                "00B7 missing from Razer device database",
+            )
+        })?;
 
-        let device = candidate
-            .open_device(&api)
-            .map_err(|_| TransportError::with_kind(TransportErrorKind::Open, "unable to open DeathAdder HID collection"))?;
+        let device = candidate.open_device(&api).map_err(|_| {
+            TransportError::with_kind(
+                TransportErrorKind::Open,
+                "unable to open DeathAdder HID collection",
+            )
+        })?;
 
         let request = build_battery_request(product.transaction_id);
         let mut feature_request = [0u8; REPORT_SIZE + 1];
         feature_request[1..].copy_from_slice(&request);
 
-        device
-            .send_feature_report(&feature_request)
-            .map_err(|_| TransportError::with_kind(TransportErrorKind::Send, "Razer battery query could not be sent"))?;
+        device.send_feature_report(&feature_request).map_err(|_| {
+            TransportError::with_kind(
+                TransportErrorKind::Send,
+                "Razer battery query could not be sent",
+            )
+        })?;
         thread::sleep(RESPONSE_DELAY);
 
         let mut reply = [0u8; REPORT_SIZE + 1];
-        let received = device
-            .get_feature_report(&mut reply)
-            .map_err(|_| TransportError::with_kind(TransportErrorKind::Receive, "Razer battery response could not be read"))?;
+        let received = device.get_feature_report(&mut reply).map_err(|_| {
+            TransportError::with_kind(
+                TransportErrorKind::Receive,
+                "Razer battery response could not be read",
+            )
+        })?;
 
         let battery = parse_feature_reply(&reply[..received], product.transaction_id)?;
 

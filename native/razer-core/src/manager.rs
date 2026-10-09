@@ -92,7 +92,9 @@ impl DeviceManager {
         let connected_ids: Vec<String> = self
             .devices
             .iter()
-            .filter(|(_, state)| state.connected && (state.battery.is_some() || state.charging.is_some()))
+            .filter(|(_, state)| {
+                state.connected && (state.battery.is_some() || state.charging.is_some())
+            })
             .map(|(id, _)| id.clone())
             .collect();
 

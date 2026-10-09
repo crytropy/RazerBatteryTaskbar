@@ -106,7 +106,10 @@ mod tests {
         assert!(error.kind.device_was_enumerated());
         assert!(TransportErrorKind::AmbiguousCollection.device_was_enumerated());
         assert!(!TransportErrorKind::Enumeration.device_was_enumerated());
-        assert_eq!(TransportError::new("fallback").kind, TransportErrorKind::Unknown);
+        assert_eq!(
+            TransportError::new("fallback").kind,
+            TransportErrorKind::Unknown
+        );
     }
 
     #[test]

@@ -351,7 +351,10 @@ mod tests {
         assert_eq!(first.consecutive_transport_failures, 1);
         assert!(first.devices[0].connected);
         assert_eq!(first.devices[0].battery, None);
-        assert!(matches!(first.events[0], DeviceEvent::BatteryChanged { .. }));
+        assert!(matches!(
+            first.events[0],
+            DeviceEvent::BatteryChanged { .. }
+        ));
         assert_eq!(
             service.frontend_snapshot().transport_error_kind.as_deref(),
             Some("receive")
@@ -370,10 +373,7 @@ mod tests {
 
     #[test]
     fn successful_absent_device_scan_still_marks_the_receiver_unplugged() {
-        let transport = ScriptedTransport::new(vec![
-            Ok(vec![mouse_reading(80.0)]),
-            Ok(Vec::new()),
-        ]);
+        let transport = ScriptedTransport::new(vec![Ok(vec![mouse_reading(80.0)]), Ok(Vec::new())]);
         let mut service = CoreService::new(transport);
         service.refresh();
         let disconnected = service.refresh();
