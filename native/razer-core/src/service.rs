@@ -62,8 +62,7 @@ impl<T: BatteryTransport> CoreService<T> {
 
         let (events, transport_error) = match reading {
             Ok(readings) => {
-                self.poll_statistics.successes =
-                    self.poll_statistics.successes.saturating_add(1);
+                self.poll_statistics.successes = self.poll_statistics.successes.saturating_add(1);
                 let now_ms = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .ok()
@@ -415,7 +414,10 @@ mod tests {
 
         service.refresh();
         let failed = service.frontend_snapshot().poll_statistics;
-        assert_eq!((failed.attempts, failed.successes, failed.failures), (2, 1, 1));
+        assert_eq!(
+            (failed.attempts, failed.successes, failed.failures),
+            (2, 1, 1)
+        );
         assert_eq!(
             failed.last_battery_read_unix_ms,
             first.last_battery_read_unix_ms
