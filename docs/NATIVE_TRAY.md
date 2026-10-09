@@ -151,3 +151,22 @@ tell experimental reads from the normal placeholder mode.
 The original Electron compatibility build remains the recommended
 everyday version until reconnect, repeated polling, and Synapse
 coexistence pass real-device testing.
+
+## Faster recovery after sleep / hibernation
+
+Windows can send `PBT_APMRESUMEAUTOMATIC` and then
+`PBT_APMRESUMESUSPEND` for the same wake. The native tray registers a
+Windows suspend/resume callback; it deduplicates resume messages received
+within four seconds, then asks the background battery worker to refresh
+immediately. A second refresh is scheduled three seconds later, allowing
+the USB receiver time to re-enumerate before retrying.
+
+The event callback never opens an HID handle and never blocks the UI event
+loop. If power notification registration fails, normal scheduled polling
+remains available as a fallback. The existing experimental 60-second
+interval remains unchanged for ordinary polling; recovery refreshes are
+only sent after an actual Windows resume event.
+
+The user has confirmed successful resume recovery with the earlier polling
+version, but reported a delay. This change is intended to shorten that
+delay; it still requires real-device testing on Windows.

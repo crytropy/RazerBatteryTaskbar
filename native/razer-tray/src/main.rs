@@ -2,15 +2,20 @@
 
 mod api;
 mod polling;
+#[cfg(windows)]
+mod power_events;
 mod settings_menu;
 mod startup;
 
 use std::error::Error;
+use std::thread;
 use std::time::Duration;
 
 use api::SharedIntegrationState;
 use notify_rust::{Notification, Urgency};
 use polling::{CoreUpdate, CoreWorker};
+#[cfg(windows)]
+use power_events::PowerNotifications;
 use razer_core::frontend::FrontendSnapshot;
 use razer_core::notifications::{NotificationKind, NotificationRequest};
 use razer_core::settings::{AppSettings, SettingsStore};
@@ -34,6 +39,7 @@ const MIN_EXPERIMENTAL_POLL_SECONDS: u64 = 60;
 enum UserEvent {
     Menu(MenuEvent),
     Core(CoreUpdate),
+    PowerResume,
 }
 
 struct PlaceholderTransport;
@@ -363,6 +369,7 @@ impl ApplicationHandler<UserEvent> for TrayApplication {
         match event {
             UserEvent::Menu(event) => self.handle_menu(event_loop, event),
             UserEvent::Core(update) => self.apply_core_update(update),
+            UserEvent::PowerResume => self.refresh(),
         }
     }
 
@@ -564,6 +571,31 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+
+    // Windows sends an automatic resume event, often followed by a second
+    // user-resume event. The power callback deduplicates the pair.
+    // Retry once after the receiver's USB/HID interface has had time to recover.
+    #[cfg(windows)]
+    let _power_notifications = {
+        let resume_proxy = event_loop.create_proxy();
+        match PowerNotifications::register(move || {
+            let _ = resume_proxy.send_event(UserEvent::PowerResume);
+
+            let retry_proxy = resume_proxy.clone();
+            let _ = thread::Builder::new()
+                .name("razer-resume-retry".to_string())
+                .spawn(move || {
+                    thread::sleep(Duration::from_secs(3));
+                    let _ = retry_proxy.send_event(UserEvent::PowerResume);
+                });
+        }) {
+            Ok(registration) => Some(registration),
+            Err(error) => {
+                eprintln!("Windows resume notification unavailable: {error}");
+                None
+            }
+        }
+    };
 
     let menu_proxy = event_loop.create_proxy();
     MenuEvent::set_event_handler(Some(move |event| {
