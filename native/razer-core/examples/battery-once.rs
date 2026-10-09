@@ -28,7 +28,10 @@ mod test_app {
 
     fn parse_response(bytes: &[u8], transaction_id: u8) -> Result<f32, Box<dyn Error>> {
         if bytes.len() < REPORT_SIZE + 1 {
-            return Err(invalid_response("short HID feature report: expected report ID plus 90 bytes").into());
+            return Err(invalid_response(
+                "short HID feature report: expected report ID plus 90 bytes",
+            )
+            .into());
         }
 
         if bytes[0] != 0 {
@@ -45,11 +48,15 @@ mod test_app {
         }
 
         if report[1] != transaction_id {
-            return Err(invalid_response("Razer reply transaction ID does not match request").into());
+            return Err(
+                invalid_response("Razer reply transaction ID does not match request").into(),
+            );
         }
 
         if report[6] != REQUEST_CLASS || report[7] != REQUEST_ID {
-            return Err(invalid_response("Razer reply command class or command ID does not match").into());
+            return Err(
+                invalid_response("Razer reply command class or command ID does not match").into(),
+            );
         }
 
         let mut full_report = [0u8; REPORT_SIZE];
@@ -111,13 +118,15 @@ mod test_app {
         match env::args().nth(1).as_deref() {
             Some("--read-battery-once") if env::args().len() == 2 => {}
             Some("--help") | Some("-h") if env::args().len() == 2 => {
-                println!("RazerBatteryTaskbar Battery Once Test\n\n\
+                println!(
+                    "RazerBatteryTaskbar Battery Once Test\n\n\
                     Usage:\n  RazerBatteryTaskbar-Battery-Once-Test.exe --read-battery-once\n\n\
                     This test opens only PID 00B7, MI_00, usage 0001:0002 and sends\n\
                     ONE Razer battery query (SetFeature/GetFeature).\n\
                     It does not change DPI, polling rate, lighting, or device settings.\n\
                     Quit Razer Synapse and its background services before the first test.\n\
-                    No HID paths or serial numbers are printed.");
+                    No HID paths or serial numbers are printed."
+                );
                 return Ok(());
             }
             _ => {
