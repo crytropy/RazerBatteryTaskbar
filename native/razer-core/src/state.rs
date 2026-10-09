@@ -107,6 +107,23 @@ impl DeviceState {
         }
     }
 
+    /// The receiver was enumerated but a battery transaction failed.
+    /// Keep its connection state, but never present a stale battery value.
+    pub fn read_unavailable(previous: &Self) -> Self {
+        Self {
+            id: previous.id.clone(),
+            vendor_id: previous.vendor_id,
+            product_id: previous.product_id,
+            name: previous.name.clone(),
+            device_type: previous.device_type,
+            battery: None,
+            charging: None,
+            connected: true,
+            serial_number: previous.serial_number.clone(),
+            last_updated: SystemTime::now(),
+        }
+    }
+
     pub fn disconnected(previous: &Self) -> Self {
         Self {
             id: previous.id.clone(),
@@ -154,6 +171,17 @@ mod tests {
             build_device_id(0x1532, 0x00AB, Some("ABC123")),
             "usb:1532:00AB:ABC123",
         );
+    }
+
+    #[test]
+    fn failed_read_does_not_imply_the_receiver_was_removed() {
+        let previous = DeviceState::connected(reading());
+        let unavailable = DeviceState::read_unavailable(&previous);
+
+        assert!(unavailable.connected);
+        assert_eq!(unavailable.id, previous.id);
+        assert_eq!(unavailable.battery, None);
+        assert_eq!(unavailable.charging, None);
     }
 
     #[test]

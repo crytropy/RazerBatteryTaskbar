@@ -41,6 +41,7 @@ pub struct IntegrationSnapshot {
     pub transport_ready: bool,
     pub transport_healthy: bool,
     pub consecutive_transport_failures: u32,
+    pub transport_error_kind: Option<String>,
     pub primary_device: Option<IntegrationDevice>,
     pub devices: Vec<IntegrationDevice>,
 }
@@ -55,6 +56,7 @@ impl IntegrationSnapshot {
             transport_ready: snapshot.transport_ready,
             transport_healthy: snapshot.transport_healthy,
             consecutive_transport_failures: snapshot.consecutive_transport_failures,
+            transport_error_kind: snapshot.transport_error_kind.clone(),
             primary_device: snapshot
                 .primary_device
                 .as_ref()
@@ -97,6 +99,7 @@ mod tests {
             transport_ready: true,
             transport_healthy: true,
             consecutive_transport_failures: 0,
+            transport_error_kind: None,
         };
 
         let json = IntegrationSnapshot::from_frontend(&snapshot)
@@ -107,6 +110,7 @@ mod tests {
         assert!(json.contains(r#""service":"RazerBatteryTaskbar""#));
         assert!(json.contains(r#""transportName":"scripted""#));
         assert!(json.contains(r#""transportReady":true"#));
+        assert!(json.contains(r#""transportErrorKind":null"#));
         assert!(json.contains(r#""deviceType":"mouse""#));
         assert!(json.contains(r#""productId":171"#));
         assert!(!json.contains("serial"));

@@ -20,6 +20,7 @@ pub fn initial_state() -> SharedIntegrationState {
         transport_ready: false,
         transport_healthy: true,
         consecutive_transport_failures: 0,
+        transport_error_kind: None,
     };
 
     Arc::new(RwLock::new(
@@ -156,6 +157,7 @@ mod tests {
             transport_ready: true,
             transport_healthy: true,
             consecutive_transport_failures: 0,
+            transport_error_kind: None,
         };
 
         update_state(&state, &snapshot);

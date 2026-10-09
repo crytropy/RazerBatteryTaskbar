@@ -452,8 +452,9 @@ fn format_status(snapshot: &FrontendSnapshot) -> String {
 
     if !snapshot.transport_healthy {
         return format!(
-            "HID battery read failed ({} consecutive failures)",
-            snapshot.consecutive_transport_failures
+            "HID battery read failed ({} consecutive failures; {})",
+            snapshot.consecutive_transport_failures,
+            snapshot.transport_error_kind.as_deref().unwrap_or("unknown")
         );
     }
 
@@ -637,6 +638,7 @@ mod tests {
             transport_ready: false,
             transport_healthy: true,
             consecutive_transport_failures: 0,
+            transport_error_kind: None,
         };
 
         assert_eq!(
@@ -654,9 +656,11 @@ mod tests {
             transport_ready: true,
             transport_healthy: false,
             consecutive_transport_failures: 2,
+            transport_error_kind: None,
         };
 
         assert!(format_status(&snapshot).contains("2 consecutive failures"));
+        assert!(format_status(&snapshot).contains("unknown"));
     }
 
     #[test]

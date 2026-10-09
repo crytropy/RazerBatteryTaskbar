@@ -4,7 +4,7 @@ use crate::frontend::{FrontendDeviceState, FrontendSnapshot};
 use crate::manager::DeviceManager;
 use crate::settings::PrimaryDevicePreference;
 use crate::state::DeviceState;
-use crate::transport::BatteryTransport;
+use crate::transport::{BatteryTransport, TransportErrorKind};
 
 pub const DEFAULT_FAILURE_THRESHOLD: u32 = 3;
 
@@ -24,6 +24,7 @@ pub struct CoreService<T: BatteryTransport> {
     primary_device_preference: PrimaryDevicePreference,
     consecutive_transport_failures: u32,
     last_transport_error: Option<String>,
+    last_transport_error_kind: Option<TransportErrorKind>,
 }
 
 impl<T: BatteryTransport> CoreService<T> {
@@ -44,6 +45,7 @@ impl<T: BatteryTransport> CoreService<T> {
             primary_device_preference: PrimaryDevicePreference::Auto,
             consecutive_transport_failures: 0,
             last_transport_error: None,
+            last_transport_error_kind: None,
         }
     }
 
@@ -52,14 +54,22 @@ impl<T: BatteryTransport> CoreService<T> {
             Ok(readings) => {
                 self.consecutive_transport_failures = 0;
                 self.last_transport_error = None;
+                self.last_transport_error_kind = None;
                 (self.manager.update_from_readings(readings), None)
             }
             Err(error) => {
                 self.consecutive_transport_failures += 1;
                 let message = error.to_string();
                 self.last_transport_error = Some(message.clone());
+                self.last_transport_error_kind = Some(error.kind);
 
-                let events = if self.consecutive_transport_failures >= self.failure_threshold {
+                // Query errors happen after the receiver was enumerated, so they
+                // are not proof of unplugging. Clear its stale battery immediately,
+                // but leave connected=true. Enumeration/unknown errors retain the
+                // legacy three-failure disconnection protection.
+                let events = if error.kind.device_was_enumerated() {
+                    self.manager.mark_all_read_unavailable()
+                } else if self.consecutive_transport_failures >= self.failure_threshold {
                     self.manager.mark_all_disconnected()
                 } else {
                     Vec::new()
@@ -114,6 +124,9 @@ impl<T: BatteryTransport> CoreService<T> {
             transport_ready: self.transport.is_ready(),
             transport_healthy: self.consecutive_transport_failures == 0,
             consecutive_transport_failures: self.consecutive_transport_failures,
+            transport_error_kind: self
+                .last_transport_error_kind
+                .map(|kind| kind.as_str().to_string()),
         }
     }
 
@@ -124,6 +137,7 @@ impl<T: BatteryTransport> CoreService<T> {
             transport_ready: self.transport.is_ready(),
             consecutive_transport_failures: self.consecutive_transport_failures,
             last_transport_error: self.last_transport_error.clone(),
+            last_transport_error_kind: self.last_transport_error_kind,
             devices: self.manager.devices(),
             primary_device: self.selected_primary_device(),
         }
@@ -313,6 +327,63 @@ mod tests {
         assert!(matches!(
             failed.events[1],
             DeviceEvent::DevicesChanged { .. }
+        ));
+    }
+
+    #[test]
+    fn failed_hid_query_does_not_claim_the_receiver_was_unplugged() {
+        let transport = ScriptedTransport::new(vec![
+            Ok(vec![mouse_reading(80.0)]),
+            Err(TransportError::with_kind(
+                TransportErrorKind::Receive,
+                "receive failed",
+            )),
+            Err(TransportError::with_kind(
+                TransportErrorKind::Receive,
+                "receive failed",
+            )),
+            Ok(vec![mouse_reading(75.0)]),
+        ]);
+        let mut service = CoreService::new(transport);
+
+        service.refresh();
+        let first = service.refresh();
+        assert_eq!(first.consecutive_transport_failures, 1);
+        assert!(first.devices[0].connected);
+        assert_eq!(first.devices[0].battery, None);
+        assert!(matches!(first.events[0], DeviceEvent::BatteryChanged { .. }));
+        assert_eq!(
+            service.frontend_snapshot().transport_error_kind.as_deref(),
+            Some("receive")
+        );
+
+        let second = service.refresh();
+        assert!(second.events.is_empty());
+        assert!(second.devices[0].connected);
+
+        let recovered = service.refresh();
+        assert_eq!(recovered.devices[0].battery, Some(75.0));
+        assert!(recovered.devices[0].connected);
+        assert_eq!(recovered.consecutive_transport_failures, 0);
+        assert_eq!(service.frontend_snapshot().transport_error_kind, None);
+    }
+
+    #[test]
+    fn successful_absent_device_scan_still_marks_the_receiver_unplugged() {
+        let transport = ScriptedTransport::new(vec![
+            Ok(vec![mouse_reading(80.0)]),
+            Ok(Vec::new()),
+        ]);
+        let mut service = CoreService::new(transport);
+        service.refresh();
+        let disconnected = service.refresh();
+
+        assert!(!disconnected.devices[0].connected);
+        assert_eq!(disconnected.devices[0].battery, None);
+        assert_eq!(disconnected.consecutive_transport_failures, 0);
+        assert!(matches!(
+            disconnected.events[0],
+            DeviceEvent::Disconnected { .. }
         ));
     }
 

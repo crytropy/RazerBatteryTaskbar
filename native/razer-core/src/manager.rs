@@ -85,6 +85,42 @@ impl DeviceManager {
         events
     }
 
+    /// A candidate HID collection still exists, but its battery read failed.
+    /// Preserve connectivity and clear only unverified battery/charging data.
+    pub fn mark_all_read_unavailable(&mut self) -> Vec<DeviceEvent> {
+        let mut events = Vec::new();
+        let connected_ids: Vec<String> = self
+            .devices
+            .iter()
+            .filter(|(_, state)| state.connected && (state.battery.is_some() || state.charging.is_some()))
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for device_id in connected_ids {
+            if let Some(previous) = self.devices.get(&device_id).cloned() {
+                let current = DeviceState::read_unavailable(&previous);
+                self.devices.insert(device_id, current.clone());
+
+                if previous.battery.is_some() {
+                    events.push(DeviceEvent::BatteryChanged {
+                        previous: previous.clone(),
+                        current: current.clone(),
+                    });
+                }
+
+                if previous.charging.is_some() {
+                    events.push(DeviceEvent::ChargingChanged { previous, current });
+                }
+            }
+        }
+
+        if !events.is_empty() {
+            events.push(self.devices_changed_event());
+        }
+
+        events
+    }
+
     pub fn mark_all_disconnected(&mut self) -> Vec<DeviceEvent> {
         let mut events = Vec::new();
         let connected_ids: Vec<String> = self
@@ -252,6 +288,30 @@ mod tests {
             0x0555
         );
         assert!(manager.primary_device_for_product_id(0x9999).is_none());
+    }
+
+    #[test]
+    fn read_failure_clears_battery_without_disconnecting_receiver() {
+        let mut manager = DeviceManager::new();
+        manager.update_from_readings(vec![reading(
+            0x00AB,
+            "Mouse",
+            DeviceType::Mouse,
+            "M",
+            Some(78.0),
+            Some(false),
+        )]);
+
+        let events = manager.mark_all_read_unavailable();
+        let device = &manager.connected_devices()[0];
+        assert!(device.connected);
+        assert_eq!(device.battery, None);
+        assert_eq!(device.charging, None);
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0], DeviceEvent::BatteryChanged { .. }));
+        assert!(matches!(events[1], DeviceEvent::ChargingChanged { .. }));
+        assert!(matches!(events[2], DeviceEvent::DevicesChanged { .. }));
+        assert!(manager.mark_all_read_unavailable().is_empty());
     }
 
     #[test]

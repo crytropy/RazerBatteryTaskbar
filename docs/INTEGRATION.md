@@ -17,6 +17,7 @@ Example:
   "transportReady": true,
   "transportHealthy": true,
   "consecutiveTransportFailures": 0,
+  "transportErrorKind": null,
   "primaryDevice": {
     "vendorId": 5426,
     "productId": 171,
@@ -89,3 +90,21 @@ The contract does not mandate how it is transported. It can be used by:
 - future integrations.
 
 The first transport is the read-only loopback HTTP endpoint above. Named pipes remain an option for future privileged or command-oriented integrations, but are unnecessary for the current read-only status contract.
+
+
+## Error classification and connectivity semantics
+
+`transportErrorKind` is a stable, privacy-safe reason code (or `null`
+after a successful scan). Values are `enumeration`, `open`, `send`,
+`receive`, `invalidResponse`, `ambiguousCollection`,
+`configuration`, and `unknown`.
+
+`transportReady` indicates that a usable transport implementation is selected;
+`transportHealthy` describes whether its most recent read completed without an
+error. A receiver which was enumerated but could not complete a battery query
+remains `connected=true`, with `battery=null` and
+`transportHealthy=false`. A successful enumeration that finds no supported
+receiver instead reports `connected=false`. No raw Windows error messages,
+serials, or device paths cross this JSON boundary.
+
+The public schema remains version 1 because this new field is additive.

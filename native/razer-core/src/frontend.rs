@@ -33,6 +33,7 @@ pub struct FrontendSnapshot {
     pub transport_ready: bool,
     pub transport_healthy: bool,
     pub consecutive_transport_failures: u32,
+    pub transport_error_kind: Option<String>,
 }
 
 #[cfg(test)]

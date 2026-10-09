@@ -1,4 +1,5 @@
 use crate::state::DeviceState;
+use crate::transport::TransportErrorKind;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiagnosticsSnapshot {
@@ -7,6 +8,7 @@ pub struct DiagnosticsSnapshot {
     pub transport_ready: bool,
     pub consecutive_transport_failures: u32,
     pub last_transport_error: Option<String>,
+    pub last_transport_error_kind: Option<TransportErrorKind>,
     pub devices: Vec<DeviceState>,
     pub primary_device: Option<DeviceState>,
 }
@@ -28,6 +30,12 @@ impl DiagnosticsSnapshot {
             format!(
                 "Last transport error: {}",
                 self.last_transport_error.as_deref().unwrap_or("none")
+            ),
+            format!(
+                "Transport error kind: {}",
+                self.last_transport_error_kind
+                    .map(TransportErrorKind::as_str)
+                    .unwrap_or("none")
             ),
             format!(
                 "Primary device: {}",
@@ -90,6 +98,7 @@ mod tests {
             transport_ready: true,
             consecutive_transport_failures: 0,
             last_transport_error: None,
+            last_transport_error_kind: None,
             devices: vec![device.clone()],
             primary_device: Some(device),
         };

@@ -170,3 +170,22 @@ only sent after an actual Windows resume event.
 The user has confirmed successful resume recovery with the earlier polling
 version, but reported a delay. This change is intended to shorten that
 delay; it still requires real-device testing on Windows.
+
+
+## HID read errors versus actual receiver disconnection
+
+The experimental Windows transport now classifies problems at the source:
+enumeration, collection ambiguity, opening the HID collection, sending the
+feature query, receiving the reply, invalid response, configuration, or unknown.
+
+A receiver confirmed by successful HID enumeration is not declared unplugged
+simply because its battery transaction fails. Its connectivity is preserved
+and its battery/charging fields are cleared immediately; API consumers can
+inspect the new `transportErrorKind` field. Successful enumeration with no
+matching receiver still disconnects it. The existing three-failure fallback
+for unclassified or enumeration errors remains in place.
+
+This separation is particularly useful immediately after Windows wake, when
+the receiver's HID collection may be visible before feature reports succeed.
+It prevents displaying an old percentage as current or conflating read
+availability with physical USB attachment.
