@@ -10,6 +10,15 @@ on:
       - 'native/**'
       - 'src/devices/razer-products.json'
       - '.github/workflows/rust-core.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'native/**'
+      - 'src/devices/razer-products.json'
+      - '.github/workflows/rust-core.yml'
   workflow_dispatch:
 
 permissions:
