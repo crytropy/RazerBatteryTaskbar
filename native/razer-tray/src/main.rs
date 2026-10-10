@@ -714,6 +714,9 @@ mod tests {
         assert_ne!(battery_icon_rgba(None), battery_icon_rgba(Some(0.0)));
         assert_ne!(battery_icon_rgba(None), battery_icon_rgba(Some(100.0)));
         assert_eq!(battery_icon_rgba(Some(0.0)), battery_icon_rgba(Some(-10.0)));
-        assert_eq!(battery_icon_rgba(Some(100.0)), battery_icon_rgba(Some(110.0)));
+        assert_eq!(
+            battery_icon_rgba(Some(100.0)),
+            battery_icon_rgba(Some(110.0))
+        );
     }
 }
