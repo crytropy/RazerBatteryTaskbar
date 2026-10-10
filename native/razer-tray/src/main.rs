@@ -494,7 +494,10 @@ fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
     const HEIGHT: u32 = 16;
 
     let mut rgba = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
-    let fill_width = battery.map(|level| ((level.clamp(0.0, 100.0) / 100.0) * 9.0).round() as u32);
+    let fill_width = battery.map(|level| {
+        let normalized = level.clamp(0.0, 100.0) / 100.0;
+        (normalized * 9.0).round() as u32
+    });
 
     let mut set_pixel = |x: u32, y: u32, value: u8| {
         let index = ((y * WIDTH + x) * 4) as usize;
