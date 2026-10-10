@@ -486,9 +486,15 @@ fn build_battery_icon(battery: Option<f32>) -> Result<Icon, tray_icon::BadIcon> 
     const WIDTH: u32 = 16;
     const HEIGHT: u32 = 16;
 
+    Icon::from_rgba(battery_icon_rgba(battery), WIDTH, HEIGHT)
+}
+
+fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
+    const WIDTH: u32 = 16;
+    const HEIGHT: u32 = 16;
+
     let mut rgba = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
-    let level = battery.unwrap_or(0.0).clamp(0.0, 100.0);
-    let fill_width = ((level / 100.0) * 9.0).round() as u32;
+    let fill_width = battery.map(|level| ((level.clamp(0.0, 100.0) / 100.0) * 9.0).round() as u32);
 
     let mut set_pixel = |x: u32, y: u32, value: u8| {
         let index = ((y * WIDTH + x) * 4) as usize;
@@ -512,13 +518,32 @@ fn build_battery_icon(battery: Option<f32>) -> Result<Icon, tray_icon::BadIcon> 
         set_pixel(13, y, 220);
     }
 
-    for x in 3..(3 + fill_width) {
-        for y in 5..11 {
-            set_pixel(x, y, 255);
+    match fill_width {
+        Some(fill_width) => {
+            for x in 3..(3 + fill_width) {
+                for y in 5..11 {
+                    set_pixel(x, y, 255);
+                }
+            }
+        }
+        None => {
+            // Unknown is not zero: draw a small question mark inside the empty cell.
+            for (x, y) in [
+                (5, 6),
+                (6, 5),
+                (7, 5),
+                (8, 5),
+                (9, 6),
+                (9, 7),
+                (8, 8),
+                (7, 10),
+            ] {
+                set_pixel(x, y, 255);
+            }
         }
     }
 
-    Icon::from_rgba(rgba, WIDTH, HEIGHT)
+    rgba
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -679,5 +704,13 @@ mod tests {
         assert!(build_battery_icon(Some(0.0)).is_ok());
         assert!(build_battery_icon(Some(100.0)).is_ok());
         assert!(build_battery_icon(None).is_ok());
+    }
+
+    #[test]
+    fn unknown_battery_icon_is_distinct_from_empty_battery() {
+        assert_ne!(battery_icon_rgba(None), battery_icon_rgba(Some(0.0)));
+        assert_ne!(battery_icon_rgba(None), battery_icon_rgba(Some(100.0)));
+        assert_eq!(battery_icon_rgba(Some(0.0)), battery_icon_rgba(Some(-10.0)));
+        assert_eq!(battery_icon_rgba(Some(100.0)), battery_icon_rgba(Some(110.0)));
     }
 }
