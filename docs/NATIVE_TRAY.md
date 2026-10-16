@@ -110,9 +110,11 @@ The worker:
 - preserves the existing three-failure disconnect policy and recovery.
 
 The icon clears an old battery fill when a transport error is reported,
-instead of keeping a stale battery percentage visible. The
-`transportHealthy` field indicates read errors independently from
-`transportReady` and the device's `connected` state.
+instead of keeping a stale battery percentage visible. An unavailable
+battery reading now draws a question mark inside the battery outline,
+visually distinct from a real 0% reading. This is a tray-only change:
+it does not modify HID polling, device connectivity, the read-only API,
+or the `transportHealthy` / `transportReady` status fields.
 
 The worker is tested with a fake transport, without touching real hardware.
 Long-term HID reliability, physical reconnect behavior, and Windows sleep
