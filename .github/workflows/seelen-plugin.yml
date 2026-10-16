@@ -1,0 +1,30 @@
+name: Seelen UI plugin checks
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'integrations/seelen-ui/**'
+      - '.github/workflows/seelen-plugin.yml'
+  pull_request:
+    paths:
+      - 'integrations/seelen-ui/**'
+      - '.github/workflows/seelen-plugin.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test Seelen toolbar scripts
+        run: node --test integrations/seelen-ui/plugin.test.js

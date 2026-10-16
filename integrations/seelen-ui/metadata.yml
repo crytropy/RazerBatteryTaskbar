@@ -16,6 +16,7 @@ metadata:
 target: "@seelen/fancy-toolbar"
 
 plugin:
+  scopes: []
   type: text
   withMediaControls: false
   remoteData:

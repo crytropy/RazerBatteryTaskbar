@@ -12,11 +12,23 @@ if (!device || !device.connected) {
   return "Razer --";
 }
 
-if (device.battery === null || device.battery === undefined) {
+// An enumerated HID receiver is not the same as a successful battery read.
+// Avoid showing stale values while Windows/HID is recovering from sleep.
+if (status.transportHealthy === false) {
   return "Razer ?%";
 }
 
-const battery = Number(device.battery);
+const battery = device.battery;
+
+if (
+  typeof battery !== "number" ||
+  !Number.isFinite(battery) ||
+  battery < 0 ||
+  battery > 100
+) {
+  return "Razer ?%";
+}
+
 const charging = device.charging === true ? " ⚡" : "";
 
 return `${battery.toFixed(0)}%${charging}`;
