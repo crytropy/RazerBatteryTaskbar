@@ -16,9 +16,9 @@ Native HID transport + Rust core (existing polling)
     ↓
 FrontendSnapshot → IntegrationSnapshot v1
     ↓
-http://127.0.0.1:27212/v1/status
+http://127.0.0.1:27212/v1/status.txt   (same JSON, served as text/plain)
     ↓
-Seelen Fancy Toolbar remoteData
+Seelen Fancy Toolbar remoteData → JSON.parse inside the plugin scripts
 ```
 
 The plugin fetches the **cached status API every 5 seconds**. This does **not**
@@ -62,9 +62,17 @@ permanently through Seelen UI's resource settings.
 
 | API state | Toolbar text | Tooltip |
 | --- | --- | --- |
-| Healthy, battery = 63.92157 | `64%` | Device name and `63.9%` |
-| Healthy, battery = 0 | `0%` | Genuine 0% reading |
-| Healthy, charging | `64% ⚡` | Charging indicator |
+| Healthy, battery = 63.92157 | 🔋 `64%` | Device name and `63.9%` |
+| Healthy, battery = 0 | 🔋 `0%` | Genuine 0% reading |
+| Healthy, charging | 🔋 `64% ⚡` | Charging indicator |
+| Device idle/asleep (`deviceNotResponding`), last battery retained | 🔋 `64% 💤` | Idle/asleep, showing last known battery |
+
+The 🔋 stands for a Phosphor battery glyph (`PiBatteryFullFill` above 90%,
+`PiBatteryHighFill` above 66%, `PiBatteryMediumFill` above 33%,
+`PiBatteryLowFill` above 5%, otherwise `PiBatteryWarning`, the same steps as
+Seelen's bundled power plugin). It is wrapped in a `Group` whose colour is
+white at 50% and above, orange (`#fa8c16`) below 50%, and red (`#ff4d4f`)
+below 20%.
 | HID read failed / `battery: null` | `Razer ?%` | Temporary failure and auto-retry |
 | Missing/invalid battery response | `Razer ?%` | Battery unavailable |
 | Missing receiver, service, or incompatible schema | `Razer --` | No device / unavailable |
@@ -111,6 +119,38 @@ node --test integrations/seelen-ui/plugin.test.js
 These tests cover valid battery values, 0%, unavailable or invalid responses,
 transport failure, recovery indicators, and disconnected service. They do not
 substitute for checking the appearance of a loaded plugin in Seelen UI.
+
+## Script compatibility (sandboxjs)
+
+Seelen UI runs `template`, `tooltip`, and the other script fields inside
+`@nyariv/sandboxjs`, not a normal browser engine. Three things differ from a
+browser and each makes the toolbar item render **nothing at all**:
+
+1. The sandbox does not reliably short-circuit `&&` / `||` before a property
+   access. `!status || status.schemaVersion !== 1` throws when `status` is
+   `null`, and `typeof x === "string" && x.length > 0` throws when `x` is
+   `null`.
+2. `remoteData` values are absent until the first fetch completes, so the very
+   first render runs with `status` undefined. A script that throws on that
+   first render is dropped by the toolbar and never retried.
+
+3. JSON remote data is unusable. Seelen stores fetched data in a Svelte
+   `$state` and evaluates scripts inside a `$derived`. When the response is
+   `application/json`, the parsed object becomes a deep state proxy, and
+   **any** read of it from `@nyariv/sandboxjs` (even `status.schemaVersion`)
+   throws `state_unsafe_mutation` (Seelen log:
+   `Error executing sandboxed code: [Error: https://svelte.dev/e/state_unsafe_mutation]`).
+   A string is a primitive and is never proxied, so this plugin fetches
+   `/v1/status.txt` (same body, `text/plain`) and calls `JSON.parse` itself.
+
+Keep null checks as plain nested `if` statements, start every script with a
+`typeof status === "undefined"` guard, parse the string into a local `api`
+object, and never touch a property of a value that may be null. The Node test
+file uses `node:vm`, which is more permissive; when in doubt, run the script
+through `@nyariv/sandboxjs` directly with no `status` at all, with
+`status: null`, and with a real `/v1/status.txt` payload. Seelen's own log at
+`%LOCALAPPDATA%\com.seelen.seelen-ui\logs\Seelen UI.log` shows every
+sandbox error.
 
 ## Isolation rule
 

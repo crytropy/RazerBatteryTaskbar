@@ -178,7 +178,8 @@ delay; it still requires real-device testing on Windows.
 
 The experimental Windows transport now classifies problems at the source:
 enumeration, collection ambiguity, opening the HID collection, sending the
-feature query, receiving the reply, invalid response, configuration, or unknown.
+feature query, receiving the reply, invalid response, device not responding,
+configuration, or unknown.
 
 A receiver confirmed by successful HID enumeration is not declared unplugged
 simply because its battery transaction fails. Its connectivity is preserved
@@ -186,6 +187,19 @@ and its battery/charging fields are cleared immediately; API consumers can
 inspect the new `transportErrorKind` field. Successful enumeration with no
 matching receiver still disconnects it. The existing three-failure fallback
 for unclassified or enumeration errors remains in place.
+
+### Sleeping devices (`deviceNotResponding`)
+
+A reply whose Razer status byte is busy (`0x01`), failure (`0x03`), or
+timeout (`0x04`) is a complete, valid exchange with the receiver in which the
+wireless device simply did not answer. On a DeathAdder V3 Pro this happens
+every time the mouse goes idle. These replies are classified as
+`deviceNotResponding` instead of `invalidResponse`, and the last verified
+battery/charging values are retained rather than cleared, so the tray keeps
+showing the last known percentage until the mouse wakes and the next poll
+succeeds. Every non-success status is also written into the transport error
+message as `0xNN` for diagnostics. Status `0x05` (not supported) and any
+unrecognized status remain `invalidResponse` and still clear the battery.
 
 This separation is particularly useful immediately after Windows wake, when
 the receiver's HID collection may be visible before feature reports succeed.

@@ -6,9 +6,33 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
+// Stand-ins for Seelen's component helpers. They flatten to readable strings:
+// icon("X") -> "{X}", Group({style:{color}, content}) -> "[color:content]".
+function flatten(value) {
+  if (Array.isArray(value)) return value.map(flatten).join("");
+  return String(value);
+}
+const helpers = {
+  icon: (name) => `{${name}}`,
+  Group: (arg) => `[${arg.style.color}:${flatten(arg.content)}]`,
+};
+
+// Seelen delivers /v1/status.txt as a string; the scripts JSON.parse it. Objects
+// are still accepted so both shapes are exercised.
 function render(script, status) {
   const source = fs.readFileSync(path.join(__dirname, "plugin", script), "utf8");
-  return vm.runInNewContext(`(function () {\n${source}\n})()`, { status }, { timeout: 1000 });
+  const value =
+    status !== null && typeof status === "object" ? JSON.stringify(status) : status;
+  return flatten(
+    vm.runInNewContext(`(function () {\n${source}\n})()`, { status: value, ...helpers }, { timeout: 1000 }),
+  );
+}
+
+function renderObject(script, status) {
+  const source = fs.readFileSync(path.join(__dirname, "plugin", script), "utf8");
+  return flatten(
+    vm.runInNewContext(`(function () {\n${source}\n})()`, { status, ...helpers }, { timeout: 1000 }),
+  );
 }
 
 function sample(overrides = {}) {
@@ -30,13 +54,29 @@ function sample(overrides = {}) {
 }
 
 test("shows actual percentage for a healthy connected device", () => {
-  assert.equal(render("template.js", sample()), "64%");
+  assert.equal(render("template.js", sample()), "[white:{PiBatteryMediumFill}] 64%");
+  assert.equal(renderObject("template.js", sample()), "[white:{PiBatteryMediumFill}] 64%");
+  assert.equal(render("template.js", "{not json"), "Razer --");
+  assert.equal(render("template.js", undefined), "Razer --");
   assert.equal(
     render("template.js", sample({
       primaryDevice: { connected: true, battery: 0, charging: true },
     })),
-    "0% ⚡",
+    "[#ff4d4f:{PiBatteryWarning}] 0% ⚡",
   );
+});
+
+test("battery icon colour is white >= 50, orange < 50, red < 20", () => {
+  const at = (battery) =>
+    render("template.js", sample({ primaryDevice: { connected: true, battery, charging: null } }));
+  assert.equal(at(95), "[white:{PiBatteryFullFill}] 95%");
+  assert.equal(at(70), "[white:{PiBatteryHighFill}] 70%");
+  assert.equal(at(50), "[white:{PiBatteryMediumFill}] 50%");
+  assert.equal(at(49.9), "[#fa8c16:{PiBatteryMediumFill}] 50%");
+  assert.equal(at(25), "[#fa8c16:{PiBatteryLowFill}] 25%");
+  assert.equal(at(20), "[#fa8c16:{PiBatteryLowFill}] 20%");
+  assert.equal(at(19.9), "[#ff4d4f:{PiBatteryLowFill}] 20%");
+  assert.equal(at(3), "[#ff4d4f:{PiBatteryWarning}] 3%");
 });
 
 test("does not present a stale percentage during a failed HID transport read", () => {
@@ -51,6 +91,27 @@ test("does not present a stale percentage during a failed HID transport read", (
   assert.match(tooltip, /retrying automatically/);
   assert.match(tooltip, /Battery unavailable/);
   assert.doesNotMatch(tooltip, /63\.9%/);
+});
+
+test("keeps showing the last known percentage while the device is asleep", () => {
+  const snapshot = sample({
+    transportHealthy: false,
+    transportErrorKind: "deviceNotResponding",
+  });
+  assert.equal(render("template.js", snapshot), "[white:{PiBatteryMediumFill}] 64% 💤");
+  const tooltip = render("tooltip.js", snapshot);
+  assert.match(tooltip, /idle or asleep/);
+  assert.match(tooltip, /last known battery/);
+  assert.match(tooltip, /63\.9%/);
+  assert.doesNotMatch(tooltip, /Battery unavailable/);
+
+  // Sleeping with no retained value still must not show 0%.
+  const noValue = sample({
+    transportHealthy: false,
+    transportErrorKind: "deviceNotResponding",
+    primaryDevice: { connected: true, battery: null, charging: null },
+  });
+  assert.equal(render("template.js", noValue), "Razer ?%");
 });
 
 test("displays unknown when battery is absent or invalid, not zero", () => {

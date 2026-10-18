@@ -16,6 +16,11 @@ const INTERFACE_NUMBER: i32 = 0;
 const USAGE_PAGE: u16 = 0x0001;
 const USAGE: u16 = 0x0002;
 const SUCCESS_STATUS: u8 = 0x02;
+/// Razer status bytes other than success, as documented by OpenRazer.
+const STATUS_BUSY: u8 = 0x01;
+const STATUS_FAILURE: u8 = 0x03;
+const STATUS_TIMEOUT: u8 = 0x04;
+const STATUS_NOT_SUPPORTED: u8 = 0x05;
 const COMMAND_CLASS: u8 = 0x07;
 const COMMAND_ID: u8 = 0x80;
 const RESPONSE_DELAY: Duration = Duration::from_millis(500);
@@ -31,6 +36,39 @@ impl ExperimentalDeathAdderTransport {
 impl Default for ExperimentalDeathAdderTransport {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Translate a non-success Razer status byte into a classified error whose
+/// message always carries the raw status code for diagnostics.
+pub fn classify_status(status: u8) -> TransportError {
+    match status {
+        STATUS_BUSY => TransportError::with_kind(
+            TransportErrorKind::DeviceNotResponding,
+            format!(
+                "Razer status 0x{status:02X} (busy): device did not answer; it may be idle or asleep"
+            ),
+        ),
+        STATUS_FAILURE => TransportError::with_kind(
+            TransportErrorKind::DeviceNotResponding,
+            format!(
+                "Razer status 0x{status:02X} (failure): receiver could not reach the device; it may be asleep or out of range"
+            ),
+        ),
+        STATUS_TIMEOUT => TransportError::with_kind(
+            TransportErrorKind::DeviceNotResponding,
+            format!("Razer status 0x{status:02X} (timeout): device did not answer in time"),
+        ),
+        STATUS_NOT_SUPPORTED => TransportError::with_kind(
+            TransportErrorKind::InvalidResponse,
+            format!(
+                "Razer status 0x{status:02X} (not supported): device rejected the battery command"
+            ),
+        ),
+        _ => TransportError::with_kind(
+            TransportErrorKind::InvalidResponse,
+            format!("Razer status 0x{status:02X}: command did not report success"),
+        ),
     }
 }
 
@@ -53,10 +91,7 @@ pub fn parse_feature_reply(bytes: &[u8], transaction_id: u8) -> Result<f32, Tran
     report.copy_from_slice(&bytes[1..REPORT_SIZE + 1]);
 
     if report[0] != SUCCESS_STATUS {
-        return Err(TransportError::with_kind(
-            TransportErrorKind::InvalidResponse,
-            "Razer command did not report success",
-        ));
+        return Err(classify_status(report[0]));
     }
 
     if report[1] != transaction_id {
@@ -212,6 +247,35 @@ mod tests {
         let mut incorrect = valid;
         incorrect[10] = 44;
         assert!(parse_feature_reply(&incorrect, 0x1f).is_err());
+    }
+
+    #[test]
+    fn non_success_status_is_classified_and_reported_in_the_message() {
+        let valid = reply(0x1f, 201);
+
+        for status in [STATUS_BUSY, STATUS_FAILURE, STATUS_TIMEOUT] {
+            let mut asleep = valid;
+            asleep[1] = status;
+            let error = parse_feature_reply(&asleep, 0x1f).unwrap_err();
+            assert_eq!(error.kind, TransportErrorKind::DeviceNotResponding);
+            assert!(
+                error.message.contains(&format!("0x{status:02X}")),
+                "message should carry the raw status: {}",
+                error.message
+            );
+        }
+
+        let mut unsupported = valid;
+        unsupported[1] = STATUS_NOT_SUPPORTED;
+        let error = parse_feature_reply(&unsupported, 0x1f).unwrap_err();
+        assert_eq!(error.kind, TransportErrorKind::InvalidResponse);
+        assert!(error.message.contains("0x05"));
+
+        let mut unknown = valid;
+        unknown[1] = 0x7E;
+        let error = parse_feature_reply(&unknown, 0x1f).unwrap_err();
+        assert_eq!(error.kind, TransportErrorKind::InvalidResponse);
+        assert!(error.message.contains("0x7E"));
     }
 
     #[test]

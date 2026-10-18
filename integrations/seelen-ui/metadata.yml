@@ -20,8 +20,10 @@ plugin:
   type: text
   withMediaControls: false
   remoteData:
+    # Deliberately the text/plain variant: Seelen's JSON remote data is a
+    # Svelte state proxy that sandboxed scripts cannot read (see README).
     status:
-      url: http://127.0.0.1:27212/v1/status
+      url: http://127.0.0.1:27212/v1/status.txt
       updateIntervalSeconds: 5
   template: !include plugin/template.js
   tooltip: !include plugin/tooltip.js

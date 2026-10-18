@@ -41,9 +41,19 @@ mod test_app {
         let report = &bytes[1..1 + REPORT_SIZE];
 
         if report[0] != SUCCESS_STATUS {
-            return Err(invalid_response(
-                "Razer battery request was not acknowledged with success status 0x02",
-            )
+            let status = report[0];
+            let meaning = match status {
+                0x01 => "busy: device did not answer; it may be idle or asleep",
+                0x03 => {
+                    "failure: receiver could not reach the device; it may be asleep or out of range"
+                }
+                0x04 => "timeout: device did not answer in time",
+                0x05 => "not supported: device rejected the battery command",
+                _ => "unrecognized status",
+            };
+            return Err(invalid_response(&format!(
+                "Razer battery request was not acknowledged with success status 0x02 (got 0x{status:02X}, {meaning})"
+            ))
             .into());
         }
 

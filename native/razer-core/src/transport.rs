@@ -11,6 +11,10 @@ pub enum TransportErrorKind {
     Send,
     Receive,
     InvalidResponse,
+    /// The receiver answered, but reported that the device itself did not
+    /// (busy, failure, or timeout status). Typical when a wireless mouse is
+    /// idle/asleep or momentarily out of range.
+    DeviceNotResponding,
     AmbiguousCollection,
     Configuration,
 }
@@ -25,6 +29,7 @@ impl TransportErrorKind {
             Self::Send => "send",
             Self::Receive => "receive",
             Self::InvalidResponse => "invalidResponse",
+            Self::DeviceNotResponding => "deviceNotResponding",
             Self::AmbiguousCollection => "ambiguousCollection",
             Self::Configuration => "configuration",
         }
@@ -38,8 +43,17 @@ impl TransportErrorKind {
                 | Self::Send
                 | Self::Receive
                 | Self::InvalidResponse
+                | Self::DeviceNotResponding
                 | Self::AmbiguousCollection
         )
+    }
+
+    /// The receiver is present and the protocol exchange was well-formed, but
+    /// the wireless device simply did not answer. The last verified battery
+    /// value stays meaningful (the device is most likely asleep), so it is
+    /// retained instead of being cleared.
+    pub fn retains_last_battery(self) -> bool {
+        matches!(self, Self::DeviceNotResponding)
     }
 }
 
@@ -106,6 +120,14 @@ mod tests {
         assert!(error.kind.device_was_enumerated());
         assert!(TransportErrorKind::AmbiguousCollection.device_was_enumerated());
         assert!(!TransportErrorKind::Enumeration.device_was_enumerated());
+        assert_eq!(
+            TransportErrorKind::DeviceNotResponding.as_str(),
+            "deviceNotResponding"
+        );
+        assert!(TransportErrorKind::DeviceNotResponding.device_was_enumerated());
+        assert!(TransportErrorKind::DeviceNotResponding.retains_last_battery());
+        assert!(!TransportErrorKind::InvalidResponse.retains_last_battery());
+        assert!(!TransportErrorKind::Receive.retains_last_battery());
         assert_eq!(
             TransportError::new("fallback").kind,
             TransportErrorKind::Unknown

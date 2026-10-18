@@ -83,11 +83,17 @@ impl<T: BatteryTransport> CoreService<T> {
                 self.last_transport_error = Some(message.clone());
                 self.last_transport_error_kind = Some(error.kind);
 
-                // Query errors happen after the receiver was enumerated, so they
-                // are not proof of unplugging. Clear its stale battery immediately,
-                // but leave connected=true. Enumeration/unknown errors retain the
-                // legacy three-failure disconnection protection.
-                let events = if error.kind.device_was_enumerated() {
+                // A well-formed reply saying the wireless device did not answer
+                // (busy/failure/timeout) almost always means it is asleep. Keep
+                // the last verified battery and connection state untouched.
+                //
+                // Other query errors happen after the receiver was enumerated, so
+                // they are not proof of unplugging. Clear the stale battery
+                // immediately, but leave connected=true. Enumeration/unknown
+                // errors retain the legacy three-failure disconnection protection.
+                let events = if error.kind.retains_last_battery() {
+                    Vec::new()
+                } else if error.kind.device_was_enumerated() {
                     self.manager.mark_all_read_unavailable()
                 } else if self.consecutive_transport_failures >= self.failure_threshold {
                     self.manager.mark_all_disconnected()
@@ -389,6 +395,46 @@ mod tests {
         assert_eq!(recovered.devices[0].battery, Some(75.0));
         assert!(recovered.devices[0].connected);
         assert_eq!(recovered.consecutive_transport_failures, 0);
+        assert_eq!(service.frontend_snapshot().transport_error_kind, None);
+    }
+
+    #[test]
+    fn sleeping_device_keeps_last_battery_and_stays_connected() {
+        let transport = ScriptedTransport::new(vec![
+            Ok(vec![mouse_reading(80.0)]),
+            Err(TransportError::with_kind(
+                TransportErrorKind::DeviceNotResponding,
+                "Razer status 0x03 (failure)",
+            )),
+            Err(TransportError::with_kind(
+                TransportErrorKind::DeviceNotResponding,
+                "Razer status 0x03 (failure)",
+            )),
+            Err(TransportError::with_kind(
+                TransportErrorKind::DeviceNotResponding,
+                "Razer status 0x03 (failure)",
+            )),
+            Ok(vec![mouse_reading(79.0)]),
+        ]);
+        let mut service = CoreService::new(transport);
+
+        service.refresh();
+
+        for expected_failures in 1..=3 {
+            let asleep = service.refresh();
+            assert_eq!(asleep.consecutive_transport_failures, expected_failures);
+            assert!(asleep.events.is_empty());
+            assert!(asleep.devices[0].connected);
+            assert_eq!(asleep.devices[0].battery, Some(80.0));
+            assert_eq!(
+                service.frontend_snapshot().transport_error_kind.as_deref(),
+                Some("deviceNotResponding")
+            );
+        }
+
+        let awake = service.refresh();
+        assert_eq!(awake.devices[0].battery, Some(79.0));
+        assert_eq!(awake.consecutive_transport_failures, 0);
         assert_eq!(service.frontend_snapshot().transport_error_kind, None);
     }
 

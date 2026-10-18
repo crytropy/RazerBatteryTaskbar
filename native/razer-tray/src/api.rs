@@ -8,7 +8,26 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 pub const API_ADDRESS: &str = "127.0.0.1:27212";
 pub const STATUS_PATH: &str = "/v1/status";
+/// Same JSON body as `STATUS_PATH`, served as `text/plain`.
+///
+/// Seelen UI (2.8.x) parses `application/json` remote data into a Svelte deep
+/// state proxy, and any access to that proxy from a sandboxed plugin script
+/// throws `state_unsafe_mutation`, so JSON remote data is unusable there. A
+/// plain-text response stays a primitive string, which the plugin can
+/// `JSON.parse` itself. See `integrations/seelen-ui/README.md`.
+pub const STATUS_TEXT_PATH: &str = "/v1/status.txt";
+const JSON_CONTENT_TYPE: &str = "application/json; charset=UTF-8";
+const TEXT_CONTENT_TYPE: &str = "text/plain; charset=UTF-8";
 const SEELEN_ORIGIN: &str = "http://tauri.localhost";
+
+/// Content type for a status URL, or `None` when the path is not served.
+pub fn status_content_type(url: &str) -> Option<&'static str> {
+    match url {
+        STATUS_PATH => Some(JSON_CONTENT_TYPE),
+        STATUS_TEXT_PATH => Some(TEXT_CONTENT_TYPE),
+        _ => None,
+    }
+}
 
 pub type SharedIntegrationState = Arc<RwLock<String>>;
 
@@ -69,7 +88,7 @@ fn respond(request: Request, state: &SharedIntegrationState) {
         return;
     }
 
-    if request.url() != STATUS_PATH {
+    let Some(content_type) = status_content_type(request.url()) else {
         send_response(
             request,
             StatusCode(404),
@@ -77,7 +96,7 @@ fn respond(request: Request, state: &SharedIntegrationState) {
             "text/plain; charset=UTF-8",
         );
         return;
-    }
+    };
 
     let body = match state.read() {
         Ok(current) => current.clone(),
@@ -87,18 +106,13 @@ fn respond(request: Request, state: &SharedIntegrationState) {
                 request,
                 StatusCode(503),
                 r#"{"error":"integration state unavailable"}"#,
-                "application/json; charset=UTF-8",
+                content_type,
             );
             return;
         }
     };
 
-    send_response(
-        request,
-        StatusCode(200),
-        body,
-        "application/json; charset=UTF-8",
-    );
+    send_response(request, StatusCode(200), body, content_type);
 }
 
 fn send_response(
@@ -138,6 +152,20 @@ mod tests {
         assert!(json.contains(r#""transportName":"placeholder""#));
         assert!(json.contains(r#""transportReady":false"#));
         assert!(json.contains(r#""devices":[]"#));
+    }
+
+    #[test]
+    fn text_status_path_serves_the_same_body_as_plain_text() {
+        assert_eq!(
+            status_content_type("/v1/status"),
+            Some("application/json; charset=UTF-8")
+        );
+        assert_eq!(
+            status_content_type("/v1/status.txt"),
+            Some("text/plain; charset=UTF-8")
+        );
+        assert_eq!(status_content_type("/v1/status.json"), None);
+        assert_eq!(status_content_type("/"), None);
     }
 
     #[test]

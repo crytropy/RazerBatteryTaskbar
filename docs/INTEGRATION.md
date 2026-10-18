@@ -100,11 +100,24 @@ The contract does not mandate how it is transported. It can be used by:
 The first transport is the read-only loopback HTTP endpoint above. Named pipes remain an option for future privileged or command-oriented integrations, but are unnecessary for the current read-only status contract.
 
 
+## Plain-text variant for Seelen UI
+
+```text
+http://127.0.0.1:27212/v1/status.txt
+```
+
+Serves the identical JSON document with `Content-Type: text/plain`. Seelen UI
+2.8.x turns `application/json` remote data into a Svelte deep state proxy, and
+every read of that proxy from a sandboxed plugin script fails with
+`state_unsafe_mutation`, so the bundled Seelen adapter fetches this text
+variant and parses it itself. Other integrations should keep using
+`/v1/status`.
+
 ## Error classification and connectivity semantics
 
 `transportErrorKind` is a stable, privacy-safe reason code (or `null`
 after a successful scan). Values are `enumeration`, `open`, `send`,
-`receive`, `invalidResponse`, `ambiguousCollection`,
+`receive`, `invalidResponse`, `deviceNotResponding`, `ambiguousCollection`,
 `configuration`, and `unknown`.
 
 `transportReady` indicates that a usable transport implementation is selected;
@@ -112,7 +125,16 @@ after a successful scan). Values are `enumeration`, `open`, `send`,
 error. A receiver which was enumerated but could not complete a battery query
 remains `connected=true`, with `battery=null` and
 `transportHealthy=false`. A successful enumeration that finds no supported
-receiver instead reports `connected=false`. No raw Windows error messages,
+receiver instead reports `connected=false`.
+
+`deviceNotResponding` is the one exception to the `battery=null` rule. It means
+the receiver answered with a well-formed Razer reply whose status byte was
+busy (`0x01`), failure (`0x03`), or timeout (`0x04`): the wireless device
+itself did not answer, which is normal while a mouse is idle/asleep or briefly
+out of range. In that case `battery` and `charging` keep their last verified
+values and `connected` stays `true`, so integrations should treat them as
+"last known" rather than "current". `transportHealthy` is still `false`.
+No raw Windows error messages,
 serials, or device paths cross this JSON boundary.
 
 The public schema remains version 1 because this new field is additive.
