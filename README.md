@@ -1,74 +1,74 @@
 # RazerBatteryTaskbar
 
-A Windows tray utility for displaying battery state from supported Razer wireless devices.
+在 Windows 系統匣顯示 Razer 無線裝置電量的小工具。
 
-This fork is being modernized incrementally. The original Electron/USB application remains the **usable compatibility build**, while a lightweight Rust/native replacement is developed and hardware-validated in parallel.
+這個分支正在逐步現代化。原本的 Electron/USB 版本仍然是**可正常使用的相容版**，同時平行開發一個輕量的 Rust 原生版本，並在真實硬體上驗證。
 
-## Which build should I use?
+## 我該用哪一版？
 
-### Compatibility build — use this for normal testing
+### 相容版（Compatibility build）：一般測試請用這個
 
-The Electron build is currently the version intended to read real device battery data.
+Electron 版是目前預期能讀到真實裝置電量的版本。
 
-Download the latest automatic Windows installer:
+下載最新的 Windows 自動安裝檔：
 
 https://github.com/crytropy/RazerBatteryTaskbar/releases/tag/dev-build
 
-Asset:
+檔案：
 
 `RazerBatteryTaskbar-Windows-Setup.exe`
 
-The development release is automatically rebuilt from `main` when compatibility-runtime code changes.
+只要 `main` 上與相容版執行環境相關的程式碼有變動，這個開發版就會自動重新建置。
 
-### Native Preview — architecture/UI testing only
+### 原生預覽版（Native Preview）：架構與 UI 測試用
 
-The Rust/native tray is already able to run as a lightweight Windows tray application and includes:
+Rust 原生系統匣已經能以輕量 Windows 系統匣程式的形式執行，包含：
 
-- native tray icon and menu;
-- multi-device core/state model;
-- persistent settings;
-- runtime polling interval control;
-- low/critical battery thresholds;
-- Windows battery notifications;
-- Start with Windows;
-- single-instance protection;
-- privacy-safe frontend snapshots;
-- read-only local integration API;
-- optional Seelen UI adapter.
+- 原生系統匣圖示與選單；
+- 多裝置核心／狀態模型；
+- 持久化設定；
+- 執行期可調整的輪詢間隔；
+- 低電量／嚴重低電量門檻；
+- Windows 電量通知；
+- 開機自動啟動；
+- 單一執行個體保護；
+- 不含隱私資訊的前端快照；
+- 唯讀的本機整合 API；
+- 可選的 Seelen UI 轉接器。
 
-**Default startup still uses the placeholder transport.** A one-shot battery read succeeded on a real DeathAdder V3 Pro receiver (1532:00B7), and an **experimental opt-in** transport can now query this specific device. Other hardware is not enabled, and sustained polling/Synapse coexistence are not verified yet.
+**預設啟動仍使用佔位（placeholder）傳輸層。** 一次性電量讀取已在真實的 DeathAdder V3 Pro 接收器（1532:00B7）上成功，並提供一個**需明確啟用的實驗性**傳輸層來查詢這一款裝置。其他硬體尚未啟用。在同一顆接收器上，持續輪詢、拔插／睡眠喚醒後的自動重連、以及滑鼠休眠時的處理（保留上次電量）都已經過數小時的實機驗證；與 Synapse 共存則尚未驗證。
 
-After extracting the Native Preview artifact, close Synapse and Razer services before trying:
+解壓縮原生預覽版後，先關閉 Synapse 與 Razer 相關服務，再執行：
 
 ```powershell
 .\RazerBatteryTaskbar-Native-Preview.exe --experimental-hid-00b7
 ```
 
-This mode sends a battery query on launch and at least 60 seconds apart. Running the EXE without arguments remains placeholder-only. Consult [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md) before using it.
+這個模式會在啟動時送出一次電量查詢，之後每次查詢至少間隔 60 秒。不帶參數執行時仍然只有佔位傳輸層。使用前請先閱讀 [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md)。
 
-The latest preview is available from the **Rust Native Preview** workflow artifacts:
+最新預覽版可從 **Rust Native Preview** 工作流程的 artifact 取得：
 
 https://github.com/crytropy/RazerBatteryTaskbar/actions/workflows/rust-core.yml
 
-Artifact:
+Artifact：
 
 `RazerBatteryTaskbar-Native-Preview`
 
-The artifact contains:
+內容包含：
 
 - `RazerBatteryTaskbar-Native-Preview.exe`
 - `SHA256SUMS.txt`
 - `README-NATIVE-PREVIEW.txt`
 
-### HID Probe — hardware validation tool
+### HID Probe：硬體驗證工具
 
-The same Rust workflow produces:
+同一個 Rust 工作流程也會產出：
 
 `RazerBatteryTaskbar-HID-Probe`
 
-This is a read-only diagnostic utility used to enumerate Razer HID collections before the native battery transport is enabled. It does not open device handles or send Razer battery protocol requests.
+這是一個唯讀的診斷工具，用來在啟用原生電量傳輸層之前列舉 Razer 的 HID collection。它不會開啟裝置控制代碼，也不會送出 Razer 電量協定請求。
 
-After extracting the HID Probe artifact ZIP, run it in PowerShell:
+解壓縮 HID Probe 的 ZIP 後，在 PowerShell 執行：
 
 ```powershell
 .\RazerBatteryTaskbar-HID-Probe.exe
@@ -76,88 +76,96 @@ After extracting the HID Probe artifact ZIP, run it in PowerShell:
 .\RazerBatteryTaskbar-HID-Probe.exe --pid 0x00AB
 ```
 
-The JSON report excludes serial numbers and HID paths. A known product ID does not imply that its HID battery protocol has been verified. See [docs/TESTING.md](docs/TESTING.md).
+JSON 報告不包含序號與 HID 路徑。產品 ID 在資料庫中有紀錄，不代表它的 HID 電量協定已經驗證過。詳見 [docs/TESTING.md](docs/TESTING.md)。
 
-## Architecture
+## 架構
 
 ```text
-Razer device
+Razer 裝置
     │
-    ├─ Electron compatibility runtime ── Windows Tray
+    ├─ Electron 相容版執行環境 ── Windows 系統匣
     │
-    └─ Native transport (hardware validation pending)
+    └─ 原生傳輸層（硬體驗證進行中）
              │
              ▼
         Rust Core
              │
       ┌──────┼────────┐
       ▼      ▼        ▼
-   Tray   Local API  Future adapters
+   系統匣   本機 API   未來的轉接器
              │
              ▼
         Seelen UI
 ```
 
-The architecture follows four rules:
+架構遵守四條規則：
 
-1. Rust Core does not depend on a UI framework.
-2. UI integrations do not operate USB/HID devices directly.
-3. Windows Tray does not parse the Razer protocol.
-4. Optional integrations such as Seelen UI can be removed without affecting the core application.
+1. Rust Core 不依賴任何 UI 框架。
+2. UI 整合不直接操作 USB／HID 裝置。
+3. Windows 系統匣不解析 Razer 協定。
+4. 像 Seelen UI 這類可選整合，拿掉後不影響核心程式。
 
-See [ROADMAP.md](ROADMAP.md) for migration status.
+遷移進度請見 [ROADMAP.md](ROADMAP.md)。
 
-## Local integration API
+## 本機整合 API
 
-The Native Preview exposes a read-only loopback endpoint:
+原生預覽版提供一個唯讀的 loopback 端點：
 
 ```text
 http://127.0.0.1:27212/v1/status
 ```
 
-The versioned JSON contract includes device name/type, product/vendor IDs, battery, charging state, connection state, and transport health.
+這份有版本號的 JSON 合約包含裝置名稱／類型、產品與廠商 ID、電量、充電狀態、連線狀態，以及傳輸層健康狀態。
 
-It deliberately excludes:
+它刻意**不**包含：
 
-- USB serial numbers;
-- internal device IDs;
-- HID paths;
-- interface numbers;
-- raw Razer protocol data.
+- USB 序號；
+- 內部裝置 ID；
+- HID 路徑；
+- 介面編號；
+- 原始 Razer 協定資料。
 
-The endpoint is GET-only and does not provide HID or settings-control commands.
+此端點只接受 GET，不提供 HID 或設定控制指令。
 
-See [docs/INTEGRATION.md](docs/INTEGRATION.md).
+另有一個內容相同、但以 `text/plain` 回應的版本：
+
+```text
+http://127.0.0.1:27212/v1/status.txt
+```
+
+這是給 Seelen UI 轉接器用的（Seelen 2.8.x 無法在外掛腳本中讀取 JSON 格式的遠端資料），其他整合請繼續使用 `/v1/status`。
+
+詳見 [docs/INTEGRATION.md](docs/INTEGRATION.md)。
 
 ## Seelen UI
 
-Seelen UI support is an **optional adapter**, not part of the core architecture.
+Seelen UI 支援是**可選的轉接器**，不屬於核心架構。
 
-The Fancy Toolbar integration lives in:
+Fancy Toolbar 整合位於：
 
 ```text
 integrations/seelen-ui/
 ```
 
-It reads only the local status API through Seelen Fancy Toolbar `remoteData`.
+它只透過 Seelen Fancy Toolbar 的 `remoteData` 讀取本機狀態 API，在工具列顯示電池圖示與百分比（50% 以上白色、50% 以下橘色、20% 以下紅色），滑鼠休眠時顯示上次電量並加上 💤。
 
-Development load:
+開發時載入：
 
 ```powershell
 slu resource load plugin .\integrations\seelen-ui
 ```
 
-Unload:
+卸載：
 
 ```powershell
 slu resource unload plugin .\integrations\seelen-ui
 ```
 
-See [integrations/seelen-ui/README.md](integrations/seelen-ui/README.md).
+永久安裝方式與 Seelen 沙盒的注意事項請見 [integrations/seelen-ui/README.md](integrations/seelen-ui/README.md)。
 
-## Running the compatibility source
+## 從原始碼執行相容版
 
-Requirements:
+需求：
 
 - Windows
 - Node.js 18
@@ -170,50 +178,50 @@ npm ci
 npm start
 ```
 
-Tests:
+測試：
 
 ```powershell
 npm test
 ```
 
-Build the Electron Windows installer:
+建置 Electron 的 Windows 安裝檔：
 
 ```powershell
 npm run make
 ```
 
-## Building the Rust workspace
+## 建置 Rust 工作區
 
-Install the stable Rust toolchain, then:
+安裝 stable 版 Rust 工具鏈（Windows 上另需 Visual Studio Build Tools 的 C++ 元件），然後：
 
 ```powershell
 cargo test --workspace
 cargo build -p razer-tray --release
 ```
 
-The native tray executable is produced at:
+原生系統匣執行檔會產生在：
 
 ```text
 target/release/razer-tray.exe
 ```
 
-Build the read-only HID enumeration probe:
+建置唯讀的 HID 列舉探測工具：
 
 ```powershell
 cargo build -p razer-core --example hid-probe --features windows-hid --release
 ```
 
-See [docs/RUST_CORE.md](docs/RUST_CORE.md), [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md), and [docs/TESTING.md](docs/TESTING.md).
+詳見 [docs/RUST_CORE.md](docs/RUST_CORE.md)、[docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md) 與 [docs/TESTING.md](docs/TESTING.md)。
 
-## Device database
+## 裝置資料庫
 
-Supported/known Razer USB product IDs and protocol transaction IDs have a single shared source of truth:
+支援／已知的 Razer USB 產品 ID 與協定 transaction ID 只有一個共用的資料來源：
 
 ```text
 src/devices/razer-products.json
 ```
 
-The database currently covers devices/variants from these families:
+資料庫目前涵蓋以下系列的裝置／變體：
 
 - Basilisk X / Ultimate / V3 Pro / V3 X HyperSpeed
 - DeathAdder V2 / V3 Pro
@@ -222,17 +230,17 @@ The database currently covers devices/variants from these families:
 - Cobra Pro
 - Mouse Dock Pro
 - HyperPolling Wireless Dongle
-- BlackShark V2 Pro (2020 and 2023 variants)
+- BlackShark V2 Pro（2020 與 2023 版）
 
-Actual compatibility still depends on the transport/interface used by a given hardware/firmware combination.
+實際相容性仍取決於特定硬體／韌體組合所使用的傳輸層與介面。
 
-## Credits
+## 致謝
 
-The original project and protocol implementation build on work from:
+原始專案與協定實作建立在以下成果之上：
 
 - [OpenRazer](https://github.com/openrazer/openrazer)
 - [hsutungyu/razer-mouse-battery-windows](https://github.com/hsutungyu/razer-mouse-battery-windows)
 
-Original project author: Tyler Dougherty.
+原始專案作者：Tyler Dougherty。
 
-License: ISC.
+授權：ISC。
