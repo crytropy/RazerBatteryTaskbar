@@ -16,6 +16,22 @@ The transport also listens for node-usb attach/detach events and emits one debou
 
 This distinction avoids turning temporary resume/driver errors into false disconnects.
 
+## Real-hardware validation (October 2026)
+
+Measured on a DeathAdder V3 Pro receiver (`1532:00B7`) with the native tray in
+`--experimental-hid-00b7` mode, Razer Synapse not installed, sampling
+`/v1/status` every 5 seconds. Details and logs are in issues #4 and #5.
+
+| Scenario | Result | Follow-up |
+| --- | --- | --- |
+| Receiver unplugged | `connected=false` within one 60 s poll; no false transport errors | #13 (USB detach does not force an immediate rescan) |
+| Receiver re-plugged | Battery restored within one poll; once faster, likely via the attach event | #13 |
+| Windows sleep → wake | Recovers automatically; the +0 s / +3 s resume refreshes fire before the mouse re-pairs, so the real update waited for the next poll (~64 s) | #12 (stagger resume refreshes) |
+| Idle mouse sleep → wake | Battery refreshed within ~13 s; last value retained while asleep (`deviceNotResponding`) | — |
+| Windows hibernate → wake | Repeatedly failed, but the tray had been started at logon without the opt-in flag and was in placeholder mode all day, so no battery read was possible regardless of hibernate. Retest after the flag is retired | #16, gated on #8 |
+| 16.5 h continuous polling | No false disconnects; battery value present throughout; 22.5 % "failures" were all `deviceNotResponding` from the idle mouse | #14 (count `deviceNotResponding` separately) |
+| Synapse coexistence | Not tested: Synapse is not installed on the test machine. Remains a known limitation | — |
+
 ## Driver policy
 
 The application must not automatically replace a Razer device driver or instruct users to use Zadig as part of normal installation.
@@ -28,11 +44,11 @@ Before the Rust migration is finalized, HIDAPI / native Windows HID access shoul
 
 Phase 7 is complete when:
 
-1. USB transport is replaceable behind a stable boundary.
-2. Attach/detach and Windows resume trigger fast reconnects.
-3. Temporary enumeration failures do not immediately erase state.
-4. Real hardware testing confirms behavior with and without Razer Synapse.
-5. A final transport choice for the Rust core is documented.
+1. USB transport is replaceable behind a stable boundary. ✅
+2. Attach/detach and Windows resume trigger fast reconnects. ✅ Verified on hardware (#4); latency improvements tracked in #12 and #13.
+3. Temporary enumeration failures do not immediately erase state. ✅ Verified over a 16.5 h run (#5).
+4. Real hardware testing confirms behavior with and without Razer Synapse. ⚠️ Without Synapse: verified (#4, #5). With Synapse: not tested, recorded as a known limitation.
+5. A final transport choice for the Rust core is documented. ⏳ Tracked in #7.
 
 
 ## Read-only HID discovery probe
