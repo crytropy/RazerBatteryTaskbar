@@ -55,6 +55,7 @@ pub struct LogicalDevice {
     pub product_id: u16,
     /// User-visible name without a "Wired" / "Wireless" suffix when paired.
     pub name: String,
+    pub device_type: DeviceType,
     pub wired: Option<u16>,
     pub wireless: Option<u16>,
 }
@@ -241,6 +242,7 @@ pub fn logical_device(product_id: u16) -> Option<LogicalDevice> {
         return Some(LogicalDevice {
             product_id: product.product_id,
             name: product.name.clone(),
+            device_type: product.device_type,
             wired: None,
             wireless: None,
         });
@@ -265,6 +267,7 @@ pub fn logical_device(product_id: u16) -> Option<LogicalDevice> {
     Some(LogicalDevice {
         product_id: wireless.or(wired).unwrap_or(product.product_id),
         name: pairing.model.clone(),
+        device_type: product.device_type,
         wired,
         wireless,
     })
@@ -314,6 +317,7 @@ mod tests {
         assert_eq!(wired, wireless);
         assert_eq!(wireless.product_id, 0x00B7);
         assert_eq!(wireless.name, "Razer DeathAdder V3 Pro");
+        assert_eq!(wireless.device_type, DeviceType::Mouse);
         assert_eq!(wireless.wired, Some(0x00B6));
         assert_eq!(wireless.wireless, Some(0x00B7));
         assert_eq!(wireless.product_ids(), vec![0x00B6, 0x00B7]);
