@@ -76,21 +76,56 @@ Runtime verification (October 2026, DeathAdder V3 Pro, HID transport enabled wit
 4. Add a primary-device selection menu when real devices are available.
 
 
-## CI preview artifacts
+## Release flow and CI artifacts
 
-The Rust workflow produces two clearly separated Windows artifacts.
+### Formal releases
 
-`RazerBatteryTaskbar-Native-Preview` contains:
+Pushing a tag that starts with `v` (for example `v1.0.0`) runs the **Rust
+Native** workflow (`.github/workflows/rust-core.yml`): `cargo fmt --check`,
+`clippy -D warnings`, the workspace tests, and a release build of
+`razer-tray.exe`. If those pass, the `publish-release` job creates the GitHub
+Release for the tag with generated release notes and attaches:
 
-- `RazerBatteryTaskbar-Native-Preview.exe`;
-- `SHA256SUMS.txt`;
-- `README-NATIVE-PREVIEW.txt`.
+- `RazerBatteryTaskbar-Native-<version>.exe`, where `<version>` is the tag
+  without the leading `v`;
+- `SHA256SUMS.txt`, the SHA-256 of that EXE;
+- `README-NATIVE.txt`, the scope notes for the build (supported receiver,
+  Synapse caveat, debug options).
 
-The README states which receiver the HID transport currently supports and that Synapse coexistence is unverified, so the preview's scope cannot be mistaken for the Electron compatibility build's.
+A tag with a SemVer pre-release suffix (`v1.0.0-rc.1`, `v1.0.0-beta.2`) is
+published as a pre-release; a plain `v1.0.0` is a normal release.
 
-`RazerBatteryTaskbar-HID-Probe` contains the read-only hardware enumeration probe, its SHA-256 checksum, and a diagnostic README.
+The **Build Windows** workflow (`build-windows.yml`) also runs for `v*` tags
+and attaches the Electron installer `RazerBatteryTaskbar-Windows-Setup.exe` to
+the same release. The release body labels it as the legacy / compatibility
+build. The two workflows never overwrite each other: both publish through
+`scripts/Publish-ReleaseAssets.ps1`, which creates the release only when it
+does not exist yet and otherwise uploads (with `--clobber`) just the file names
+the calling workflow owns. It does not matter which workflow finishes first.
 
-The Electron `Development Build` remains the compatibility build for hardware the native transport does not support yet.
+The native EXE reports the `razer-tray` Cargo version, so bump the crate
+versions to match the tag before tagging; the workflow only prints a warning
+when they differ. See the "發行流程（Releasing）" section of the [README](../README.md) for the
+exact commands.
+
+### Development build and workflow artifacts
+
+Every push to `main` that touches native code also attaches
+`RazerBatteryTaskbar-Native-dev.exe`, `SHA256SUMS.txt` and `README-NATIVE.txt`
+to the `dev-build` pre-release (the Electron `Development Build`). The
+`dev-build` tag itself is moved only by the Electron workflow, so the native
+files can be newer than the tag; the commit is printed in `README-NATIVE.txt`.
+
+Pull requests and manual runs upload workflow artifacts only:
+
+- `RazerBatteryTaskbar-Native`: the files listed above, with version `dev`;
+- `RazerBatteryTaskbar-HID-Probe`: the read-only hardware enumeration probe,
+  its SHA-256 checksum, and a diagnostic README;
+- `RazerBatteryTaskbar-Battery-Once-Test`: the standalone one-shot diagnostic
+  (see [Windows hardware verification](TESTING.md)).
+
+The Electron build remains available as the legacy / compatibility build for
+hardware the native transport does not support yet.
 
 The HID Probe supports `--json` for structured reports, `--pid 0xNNNN` for a
 specific model, and `--known-only` to filter by the shared product database.
@@ -163,7 +198,7 @@ wake and a 16.5 h polling run were validated on that receiver in October
 Start it from PowerShell with no arguments:
 
 ```powershell
-.\RazerBatteryTaskbar-Native-Preview.exe
+.\RazerBatteryTaskbar-Native-<version>.exe
 ```
 
 The transport sends a battery query on launch and then at intervals of
