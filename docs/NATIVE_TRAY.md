@@ -138,8 +138,10 @@ which the Windows HID transport fills from a second feature query per poll
 
 Known limitation: a DeathAdder V3 Pro charging over its cable enumerates as
 the wired product ID `00B6`, which the transport does not read yet
-(ticket #18). Until then the charging mark appears only while the mouse
-charges on a dock/receiver path that keeps the wireless PID `00B7`.
+(ticket #18). Until then, plugging the cable in makes the wireless PID
+`00B7` disappear from enumeration, so the tray reports the mouse as
+disconnected rather than charging; the charging mark can only appear while
+the device is still enumerated as `00B7`.
 
 The worker is tested with a fake transport, without touching real hardware.
 Long-term HID reliability, physical reconnect behavior, and Windows sleep
