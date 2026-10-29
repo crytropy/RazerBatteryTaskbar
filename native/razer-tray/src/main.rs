@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;
+#[cfg(windows)]
+mod device_events;
 mod polling;
 #[cfg(windows)]
 mod power_events;
@@ -12,6 +14,8 @@ use std::error::Error;
 use std::time::Duration;
 
 use api::SharedIntegrationState;
+#[cfg(windows)]
+use device_events::DeviceChangeNotifications;
 use notify_rust::{Notification, Urgency};
 use polling::{CoreUpdate, CoreWorker};
 #[cfg(windows)]
@@ -46,6 +50,8 @@ enum UserEvent {
     PowerResume(u64),
     /// A scheduled post-resume recovery refresh is due.
     RecoveryTick(RecoveryTick),
+    /// A debounced USB/HID device arrival or removal asks for a rescan.
+    DeviceChange,
 }
 
 struct PlaceholderTransport;
@@ -389,6 +395,7 @@ impl ApplicationHandler<UserEvent> for TrayApplication {
                     self.refresh();
                 }
             }
+            UserEvent::DeviceChange => self.refresh(),
         }
     }
 
@@ -681,6 +688,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(registration) => Some(registration),
             Err(error) => {
                 eprintln!("Windows resume notification unavailable: {error}");
+                None
+            }
+        }
+    };
+
+    // Unplugging or replugging the receiver produces a burst of HID interface
+    // notifications. The device-change module debounces them into rescans.
+    #[cfg(windows)]
+    let _device_notifications = {
+        let rescan_proxy = event_loop.create_proxy();
+        match DeviceChangeNotifications::register(move || {
+            let _ = rescan_proxy.send_event(UserEvent::DeviceChange);
+        }) {
+            Ok(registration) => Some(registration),
+            Err(error) => {
+                eprintln!("Windows device-change notification unavailable: {error}");
                 None
             }
         }
