@@ -650,6 +650,34 @@ const CHARGING_BOLT_PIXELS: [(u32, u32); 14] = [
     (6, 10),
 ];
 
+/// Tray icon fill colours, as RGB. The battery thresholds match the Seelen
+/// toolbar plugin (`integrations/seelen-ui/plugin/template.js`): white from
+/// 50 % up, orange below 50 %, red below 20 %. Charging is always green.
+const ICON_WHITE: [u8; 3] = [255, 255, 255];
+const ICON_ORANGE: [u8; 3] = [0xfa, 0x8c, 0x16];
+const ICON_RED: [u8; 3] = [0xff, 0x4d, 0x4f];
+const ICON_GREEN: [u8; 3] = [0x52, 0xc4, 0x1a];
+const ICON_OUTLINE: [u8; 3] = [220, 220, 220];
+const ICON_DARK: [u8; 3] = [0, 0, 0];
+
+/// Colour used for the battery fill (and for the bolt over an empty cell).
+/// Charging wins over every battery level; an unknown battery stays white.
+fn fill_colour(battery: Option<f32>, charging: bool) -> [u8; 3] {
+    if charging {
+        return ICON_GREEN;
+    }
+    match battery {
+        Some(level) if level < 20.0 => ICON_RED,
+        Some(level) if level < 50.0 => ICON_ORANGE,
+        _ => ICON_WHITE,
+    }
+}
+
+/// Three quarters of each channel: the "unknown battery" variant of a colour.
+fn dim(rgb: [u8; 3]) -> [u8; 3] {
+    rgb.map(|channel| (u16::from(channel) * 3 / 4) as u8)
+}
+
 fn battery_icon_rgba(battery: Option<f32>, charging: bool) -> Vec<u8> {
     const WIDTH: u32 = 16;
     const HEIGHT: u32 = 16;
@@ -659,34 +687,33 @@ fn battery_icon_rgba(battery: Option<f32>, charging: bool) -> Vec<u8> {
         let normalized = level.clamp(0.0, 100.0) / 100.0;
         (normalized * 9.0).round() as u32
     });
+    let colour = fill_colour(battery, charging);
 
-    let mut set_pixel = |x: u32, y: u32, value: u8| {
+    let mut set_pixel = |x: u32, y: u32, rgb: [u8; 3]| {
         let index = ((y * WIDTH + x) * 4) as usize;
-        rgba[index] = value;
-        rgba[index + 1] = value;
-        rgba[index + 2] = value;
+        rgba[index..index + 3].copy_from_slice(&rgb);
         rgba[index + 3] = 255;
     };
 
     for x in 2..13 {
-        set_pixel(x, 4, 220);
-        set_pixel(x, 11, 220);
+        set_pixel(x, 4, ICON_OUTLINE);
+        set_pixel(x, 11, ICON_OUTLINE);
     }
 
     for y in 4..=11 {
-        set_pixel(2, y, 220);
-        set_pixel(12, y, 220);
+        set_pixel(2, y, ICON_OUTLINE);
+        set_pixel(12, y, ICON_OUTLINE);
     }
 
     for y in 6..=9 {
-        set_pixel(13, y, 220);
+        set_pixel(13, y, ICON_OUTLINE);
     }
 
     match fill_width {
         Some(fill_width) => {
             for x in 3..(3 + fill_width) {
                 for y in 5..11 {
-                    set_pixel(x, y, 255);
+                    set_pixel(x, y, colour);
                 }
             }
         }
@@ -705,18 +732,23 @@ fn battery_icon_rgba(battery: Option<f32>, charging: bool) -> Vec<u8> {
                 (8, 8),
                 (7, 10),
             ] {
-                set_pixel(x, y, 255);
+                set_pixel(x, y, ICON_WHITE);
             }
         }
     }
 
     if charging {
-        // Invert the bolt against whatever is underneath so it stays legible
-        // over the white fill as well as over the empty (transparent) cell.
-        let unfilled_value = if battery.is_some() { 255 } else { 200 };
+        // Keep the bolt legible on both backgrounds: dark over the (green)
+        // fill, green over the empty (transparent) part of the cell. With an
+        // unknown battery the bolt is dimmed so "unknown" still differs from "0 %".
+        let empty_colour = if battery.is_some() {
+            colour
+        } else {
+            dim(colour)
+        };
         for (x, y) in CHARGING_BOLT_PIXELS {
             let filled = fill_width.is_some_and(|fill_width| x < 3 + fill_width);
-            set_pixel(x, y, if filled { 0 } else { unfilled_value });
+            set_pixel(x, y, if filled { ICON_DARK } else { empty_colour });
         }
     }
 
@@ -1028,6 +1060,88 @@ mod tests {
         assert!(!canonicalize_primary_device(&mut settings));
         let mut automatic = AppSettings::default();
         assert!(!canonicalize_primary_device(&mut automatic));
+    }
+
+    fn pixel_rgb(rgba: &[u8], x: u32, y: u32) -> [u8; 3] {
+        let index = ((y * 16 + x) * 4) as usize;
+        [rgba[index], rgba[index + 1], rgba[index + 2]]
+    }
+
+    #[test]
+    fn fill_colour_follows_battery_thresholds_when_not_charging() {
+        // Same thresholds as the Seelen toolbar plugin: red < 20, orange < 50, white otherwise.
+        assert_eq!(fill_colour(Some(0.0), false), ICON_RED);
+        assert_eq!(fill_colour(Some(19.9), false), ICON_RED);
+        assert_eq!(fill_colour(Some(20.0), false), ICON_ORANGE);
+        assert_eq!(fill_colour(Some(49.9), false), ICON_ORANGE);
+        assert_eq!(fill_colour(Some(50.0), false), ICON_WHITE);
+        assert_eq!(fill_colour(Some(100.0), false), ICON_WHITE);
+        assert_eq!(fill_colour(None, false), ICON_WHITE);
+    }
+
+    #[test]
+    fn charging_overrides_every_battery_colour_with_green() {
+        for level in [0.0, 19.9, 20.0, 49.9, 50.0, 100.0] {
+            assert_eq!(fill_colour(Some(level), true), ICON_GREEN, "at {level}%");
+        }
+        assert_eq!(fill_colour(None, true), ICON_GREEN);
+    }
+
+    #[test]
+    fn rendered_fill_pixels_use_the_state_colour() {
+        // (3, 5) is the first interior fill pixel; it is filled from 10% upwards.
+        assert_eq!(
+            pixel_rgb(&battery_icon_rgba(Some(10.0), false), 3, 5),
+            ICON_RED
+        );
+        assert_eq!(
+            pixel_rgb(&battery_icon_rgba(Some(30.0), false), 3, 5),
+            ICON_ORANGE
+        );
+        assert_eq!(
+            pixel_rgb(&battery_icon_rgba(Some(80.0), false), 3, 5),
+            ICON_WHITE
+        );
+        assert_eq!(
+            pixel_rgb(&battery_icon_rgba(Some(80.0), true), 3, 5),
+            ICON_GREEN
+        );
+        assert_eq!(
+            pixel_rgb(&battery_icon_rgba(Some(10.0), true), 3, 5),
+            ICON_GREEN
+        );
+        // The outline never changes colour.
+        for level in [Some(10.0), Some(30.0), Some(80.0), None] {
+            assert_eq!(
+                pixel_rgb(&battery_icon_rgba(level, false), 2, 4),
+                [220, 220, 220]
+            );
+            assert_eq!(
+                pixel_rgb(&battery_icon_rgba(level, true), 2, 4),
+                [220, 220, 220]
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_battery_keeps_the_white_question_mark() {
+        let icon = battery_icon_rgba(None, false);
+        assert_eq!(pixel_rgb(&icon, 6, 5), ICON_WHITE);
+        assert_eq!(pixel_rgb(&icon, 3, 5), [0, 0, 0]);
+    }
+
+    #[test]
+    fn charging_bolt_is_green_over_the_empty_cell_and_dark_over_the_fill() {
+        // 100%: every bolt pixel sits on the fill, so the bolt is dark.
+        let full = battery_icon_rgba(Some(100.0), true);
+        assert_eq!(pixel_rgb(&full, 7, 5), [0, 0, 0]);
+        // 0 %: nothing is filled, so the bolt itself carries the green.
+        let empty = battery_icon_rgba(Some(0.0), true);
+        assert_eq!(pixel_rgb(&empty, 7, 5), ICON_GREEN);
+        // Unknown battery: same bolt, dimmed, so it still differs from 0 %.
+        let unknown = battery_icon_rgba(None, true);
+        assert_eq!(pixel_rgb(&unknown, 7, 5), dim(ICON_GREEN));
+        assert_ne!(unknown, empty);
     }
 
     #[test]
