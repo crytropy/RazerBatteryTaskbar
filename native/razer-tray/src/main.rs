@@ -14,6 +14,8 @@ use std::thread;
 use std::time::Duration;
 
 use api::SharedIntegrationState;
+#[cfg(windows)]
+use device_events::DeviceChangeNotifications;
 use notify_rust::{Notification, Urgency};
 use polling::{CoreUpdate, CoreWorker};
 #[cfg(windows)]
@@ -44,6 +46,7 @@ enum UserEvent {
     Menu(MenuEvent),
     Core(CoreUpdate),
     PowerResume,
+    DeviceChange,
 }
 
 struct PlaceholderTransport;
@@ -373,7 +376,7 @@ impl ApplicationHandler<UserEvent> for TrayApplication {
         match event {
             UserEvent::Menu(event) => self.handle_menu(event_loop, event),
             UserEvent::Core(update) => self.apply_core_update(update),
-            UserEvent::PowerResume => self.refresh(),
+            UserEvent::PowerResume | UserEvent::DeviceChange => self.refresh(),
         }
     }
 
@@ -632,6 +635,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(registration) => Some(registration),
             Err(error) => {
                 eprintln!("Windows resume notification unavailable: {error}");
+                None
+            }
+        }
+    };
+
+    // Unplugging or replugging the receiver produces a burst of HID interface
+    // notifications. The device-change module debounces them into rescans.
+    #[cfg(windows)]
+    let _device_notifications = {
+        let rescan_proxy = event_loop.create_proxy();
+        match DeviceChangeNotifications::register(move || {
+            let _ = rescan_proxy.send_event(UserEvent::DeviceChange);
+        }) {
+            Ok(registration) => Some(registration),
+            Err(error) => {
+                eprintln!("Windows device-change notification unavailable: {error}");
                 None
             }
         }
