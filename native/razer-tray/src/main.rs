@@ -62,7 +62,7 @@ impl BatteryTransport for PlaceholderTransport {
 enum AppTransport {
     Placeholder(PlaceholderTransport),
     #[cfg(windows)]
-    Experimental(ExperimentalDeathAdderTransport),
+    WindowsHid(ExperimentalDeathAdderTransport),
 }
 
 impl BatteryTransport for AppTransport {
@@ -70,7 +70,7 @@ impl BatteryTransport for AppTransport {
         match self {
             Self::Placeholder(transport) => transport.name(),
             #[cfg(windows)]
-            Self::Experimental(transport) => transport.name(),
+            Self::WindowsHid(transport) => transport.name(),
         }
     }
 
@@ -78,7 +78,7 @@ impl BatteryTransport for AppTransport {
         match self {
             Self::Placeholder(transport) => transport.is_ready(),
             #[cfg(windows)]
-            Self::Experimental(transport) => transport.is_ready(),
+            Self::WindowsHid(transport) => transport.is_ready(),
         }
     }
 
@@ -86,14 +86,82 @@ impl BatteryTransport for AppTransport {
         match self {
             Self::Placeholder(transport) => transport.read_devices(),
             #[cfg(windows)]
-            Self::Experimental(transport) => transport.read_devices(),
+            Self::WindowsHid(transport) => transport.read_devices(),
         }
     }
 }
 
+/// Which battery transport the tray starts with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransportChoice {
+    /// Native Windows HID feature reports (ADR-0001). The default.
+    WindowsHid,
+    /// Reads nothing and reports `ready=false`; debug/test runs without hardware only.
+    Placeholder,
+}
+
+impl TransportChoice {
+    fn into_transport(self) -> Result<AppTransport, Box<dyn Error>> {
+        match self {
+            Self::Placeholder => Ok(AppTransport::Placeholder(PlaceholderTransport)),
+            #[cfg(windows)]
+            Self::WindowsHid => Ok(AppTransport::WindowsHid(
+                ExperimentalDeathAdderTransport::new(),
+            )),
+            #[cfg(not(windows))]
+            Self::WindowsHid => Err("the Windows HID transport requires Windows".into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchOptions {
+    Run(TransportChoice),
+    Help,
+}
+
+/// Retired opt-in flag from the preview builds; accepted as a no-op.
+const LEGACY_HID_FLAG: &str = "--experimental-hid-00b7";
+const PLACEHOLDER_FLAG: &str = "--placeholder-transport";
+
+fn parse_launch_options(args: &[String]) -> Result<LaunchOptions, String> {
+    match args {
+        [] => Ok(LaunchOptions::Run(TransportChoice::WindowsHid)),
+        [option] if option == LEGACY_HID_FLAG => {
+            eprintln!(
+                "{LEGACY_HID_FLAG} is a no-op: the Windows HID transport is already the default."
+            );
+            Ok(LaunchOptions::Run(TransportChoice::WindowsHid))
+        }
+        [option] if option == PLACEHOLDER_FLAG => {
+            Ok(LaunchOptions::Run(TransportChoice::Placeholder))
+        }
+        [option] if option == "--help" || option == "-h" => Ok(LaunchOptions::Help),
+        _ => Err("invalid arguments: use --help to see supported options".to_string()),
+    }
+}
+
+fn print_help() {
+    println!("RazerBatteryTaskbar Native Preview");
+    println!("Usage: razer-tray.exe [{PLACEHOLDER_FLAG}]");
+    println!("Starts with the native Windows HID battery transport by default.");
+    println!("  {PLACEHOLDER_FLAG}   debug only: run without any battery transport");
+    println!("  {LEGACY_HID_FLAG}  retired; accepted as a no-op");
+}
+
+/// Raise a saved poll interval to the Windows HID transport's minimum.
+/// Returns `true` when the settings were changed.
+fn clamp_poll_interval(settings: &mut AppSettings) -> bool {
+    if settings.poll_interval_seconds < MIN_POLL_INTERVAL_SECONDS {
+        settings.poll_interval_seconds = MIN_POLL_INTERVAL_SECONDS;
+        return true;
+    }
+
+    false
+}
+
 struct TrayApplication {
     worker: CoreWorker,
-    experimental_hid: bool,
     settings_store: Option<SettingsStore>,
     settings: AppSettings,
     integration_state: SharedIntegrationState,
@@ -111,11 +179,9 @@ impl TrayApplication {
         settings: AppSettings,
         integration_state: SharedIntegrationState,
         worker: CoreWorker,
-        experimental_hid: bool,
     ) -> Self {
         Self {
             worker,
-            experimental_hid,
             settings_store,
             settings,
             integration_state,
@@ -448,7 +514,7 @@ fn deliver_test_notification() {
 
 fn format_status(snapshot: &FrontendSnapshot) -> String {
     if !snapshot.transport_ready {
-        return "Native shell ready — HID transport pending".to_string();
+        return "Placeholder transport (debug) — no battery data".to_string();
     }
 
     if !snapshot.transport_healthy {
@@ -546,17 +612,12 @@ fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let experimental_hid = match args.as_slice() {
-        [] => false,
-        [option] if option == "--experimental-hid-00b7" => true,
-        [option] if option == "--help" || option == "-h" => {
-            println!("RazerBatteryTaskbar Native Preview");
-            println!("Usage: razer-tray.exe [--experimental-hid-00b7]");
-            println!("Experimental HID mode is for DeathAdder V3 Pro receiver 1532:00B7 only.");
-            println!("Close Razer Synapse for the initial repeated-read test.");
+    let transport_choice = match parse_launch_options(&args)? {
+        LaunchOptions::Run(choice) => choice,
+        LaunchOptions::Help => {
+            print_help();
             return Ok(());
         }
-        _ => return Err("invalid arguments: use --help to see supported options".into()),
     };
 
     let instance_guard = SingleInstance::new(INSTANCE_NAME)?;
@@ -568,22 +629,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (settings_store, mut settings) = load_settings();
     reconcile_startup_setting(settings_store.as_ref(), &mut settings);
 
-    settings.poll_interval_seconds = settings
-        .poll_interval_seconds
-        .max(MIN_POLL_INTERVAL_SECONDS);
+    if clamp_poll_interval(&mut settings)
+        && let Some(store) = settings_store.as_ref()
+        && let Err(error) = store.save(&settings)
+    {
+        eprintln!("failed to persist clamped poll interval: {error}");
+    }
 
-    let transport = if experimental_hid {
-        #[cfg(windows)]
-        {
-            AppTransport::Experimental(ExperimentalDeathAdderTransport::new())
-        }
-        #[cfg(not(windows))]
-        {
-            return Err("experimental HID transport requires Windows".into());
-        }
-    } else {
-        AppTransport::Placeholder(PlaceholderTransport)
-    };
+    let transport = transport_choice.into_transport()?;
 
     let initial_poll_interval = Duration::from_secs(settings.poll_interval_seconds);
 
@@ -641,13 +694,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         move |update| update_proxy.send_event(UserEvent::Core(update)).is_ok(),
     );
 
-    let mut application = TrayApplication::new(
-        settings_store,
-        settings,
-        integration_state,
-        worker,
-        experimental_hid,
-    );
+    let mut application = TrayApplication::new(settings_store, settings, integration_state, worker);
     event_loop.run_app(&mut application)?;
     drop(instance_guard);
 
@@ -659,7 +706,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_shell_status_is_explicit_about_pending_hid_transport() {
+    fn placeholder_status_is_explicit_that_no_battery_transport_is_active() {
         let snapshot = FrontendSnapshot {
             devices: Vec::new(),
             primary_device: None,
@@ -673,7 +720,7 @@ mod tests {
 
         assert_eq!(
             format_status(&snapshot),
-            "Native shell ready — HID transport pending"
+            "Placeholder transport (debug) — no battery data"
         );
     }
 
@@ -682,7 +729,7 @@ mod tests {
         let snapshot = FrontendSnapshot {
             devices: Vec::new(),
             primary_device: None,
-            transport_name: "windows-hid-00b7-experimental".to_string(),
+            transport_name: "windows-hid".to_string(),
             transport_ready: true,
             transport_healthy: false,
             consecutive_transport_failures: 2,
@@ -692,6 +739,73 @@ mod tests {
 
         assert!(format_status(&snapshot).contains("2 consecutive failures"));
         assert!(format_status(&snapshot).contains("unknown"));
+    }
+
+    #[test]
+    fn default_launch_selects_the_windows_hid_transport() {
+        let options = parse_launch_options(&[]).unwrap();
+
+        assert_eq!(options, LaunchOptions::Run(TransportChoice::WindowsHid));
+    }
+
+    #[test]
+    fn retired_hid_flag_is_accepted_as_a_no_op() {
+        let options = parse_launch_options(&["--experimental-hid-00b7".to_string()]).unwrap();
+
+        assert_eq!(options, LaunchOptions::Run(TransportChoice::WindowsHid));
+    }
+
+    #[test]
+    fn placeholder_transport_needs_the_explicit_debug_flag() {
+        let options = parse_launch_options(&["--placeholder-transport".to_string()]).unwrap();
+        assert_eq!(options, LaunchOptions::Run(TransportChoice::Placeholder));
+
+        assert_eq!(
+            parse_launch_options(&["--help".to_string()]).unwrap(),
+            LaunchOptions::Help
+        );
+        assert!(parse_launch_options(&["--placeholder".to_string()]).is_err());
+        assert!(
+            parse_launch_options(&[
+                "--placeholder-transport".to_string(),
+                "--experimental-hid-00b7".to_string()
+            ])
+            .is_err()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn default_transport_is_the_ready_windows_hid_implementation() {
+        let transport = TransportChoice::WindowsHid.into_transport().unwrap();
+
+        assert_eq!(transport.name(), "windows-hid");
+        assert!(transport.is_ready());
+    }
+
+    #[test]
+    fn placeholder_transport_is_explicitly_not_ready() {
+        let transport = TransportChoice::Placeholder.into_transport().unwrap();
+
+        assert_eq!(transport.name(), "placeholder");
+        assert!(!transport.is_ready());
+    }
+
+    #[test]
+    fn saved_poll_intervals_below_the_transport_minimum_are_clamped() {
+        let mut settings = AppSettings {
+            poll_interval_seconds: 5,
+            ..AppSettings::default()
+        };
+        assert!(clamp_poll_interval(&mut settings));
+        assert_eq!(settings.poll_interval_seconds, 60);
+
+        let mut settings = AppSettings {
+            poll_interval_seconds: 300,
+            ..AppSettings::default()
+        };
+        assert!(!clamp_poll_interval(&mut settings));
+        assert_eq!(settings.poll_interval_seconds, 300);
     }
 
     #[test]

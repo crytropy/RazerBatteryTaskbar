@@ -125,7 +125,7 @@ pub fn parse_feature_reply(bytes: &[u8], transaction_id: u8) -> Result<f32, Tran
 
 impl BatteryTransport for ExperimentalDeathAdderTransport {
     fn name(&self) -> &'static str {
-        "windows-hid-00b7-experimental"
+        "windows-hid"
     }
 
     fn read_devices(&mut self) -> Result<Vec<DeviceReading>, TransportError> {
@@ -279,9 +279,9 @@ mod tests {
     }
 
     #[test]
-    fn transport_identifies_experimental_profile_explicitly() {
+    fn transport_reports_a_stable_non_experimental_name() {
         let transport = ExperimentalDeathAdderTransport::new();
-        assert_eq!(transport.name(), "windows-hid-00b7-experimental");
+        assert_eq!(transport.name(), "windows-hid");
         assert!(transport.is_ready());
     }
 }
