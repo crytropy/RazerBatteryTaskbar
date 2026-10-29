@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;
+#[cfg(windows)]
+mod device_events;
 mod polling;
 #[cfg(windows)]
 mod power_events;
