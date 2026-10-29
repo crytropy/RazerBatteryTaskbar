@@ -50,10 +50,46 @@ impl From<io::Error> for StartupError {
     }
 }
 
-/// Command-line suffix written by previews before the Windows HID transport
-/// became the default. Such entries are still recognised as "enabled" and are
-/// replaced with the plain executable path the next time startup is enabled.
-const LEGACY_HID_FLAG_SUFFIX: &str = " --experimental-hid-00b7";
+/// Retired opt-in flag from the preview builds. On the command line it is
+/// accepted as a no-op; in a Run entry written by a preview it marks a legacy
+/// registration that still counts as "enabled" and is rewritten to the plain
+/// executable path when the tray reconciles its startup state.
+pub const LEGACY_HID_FLAG: &str = "--experimental-hid-00b7";
+
+/// How an existing Run entry relates to the current executable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisteredCommand {
+    /// The plain quoted path this build writes.
+    Current,
+    /// The quoted path followed by the retired opt-in flag.
+    Legacy,
+    /// Another executable or an unknown command line.
+    Other,
+}
+
+pub fn classify_registered_command(command: &str, executable: &Path) -> RegisteredCommand {
+    let expected = format!("\"{}\"", executable.display());
+    if command == expected {
+        RegisteredCommand::Current
+    } else if command
+        .strip_suffix(LEGACY_HID_FLAG)
+        .and_then(|prefix| prefix.strip_suffix(' '))
+        .is_some_and(|prefix| prefix == expected)
+    {
+        RegisteredCommand::Legacy
+    } else {
+        RegisteredCommand::Other
+    }
+}
+
+/// The plain command a legacy Run entry must be rewritten to, or `None` when
+/// the entry needs no change (already plain, or not ours to touch).
+pub fn migrated_command(command: &str, executable: &Path) -> Result<Option<String>, StartupError> {
+    match classify_registered_command(command, executable) {
+        RegisteredCommand::Legacy => build_startup_command(executable).map(Some),
+        RegisteredCommand::Current | RegisteredCommand::Other => Ok(None),
+    }
+}
 
 pub fn build_startup_command(executable: &Path) -> Result<String, StartupError> {
     let command = format!("\"{}\"", executable.display());
@@ -69,11 +105,37 @@ pub fn build_startup_command(executable: &Path) -> Result<String, StartupError> 
 /// Whether an existing Run entry refers to `executable`, either as the plain
 /// quoted path or as a legacy entry carrying the retired opt-in flag.
 pub fn registered_command_matches(command: &str, executable: &Path) -> bool {
-    let expected = format!("\"{}\"", executable.display());
-    command == expected
-        || command
-            .strip_suffix(LEGACY_HID_FLAG_SUFFIX)
-            .is_some_and(|prefix| prefix == expected)
+    classify_registered_command(command, executable) != RegisteredCommand::Other
+}
+
+/// Rewrite a legacy flagged Run entry for this executable to the plain path.
+/// Returns `true` when an entry was rewritten. Entries that are already plain
+/// or belong to another executable are left alone.
+#[cfg(windows)]
+pub fn migrate_legacy_entry() -> Result<bool, StartupError> {
+    use windows_registry::CURRENT_USER;
+
+    let executable = std::env::current_exe()?;
+    let Ok(key) = CURRENT_USER.create(RUN_KEY) else {
+        return Ok(false);
+    };
+    let Ok(command) = key.get_string(VALUE_NAME) else {
+        return Ok(false);
+    };
+
+    match migrated_command(&command, &executable)? {
+        Some(plain) => {
+            key.set_string(VALUE_NAME, plain)
+                .map_err(|error| StartupError::Registry(error.to_string()))?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+#[cfg(not(windows))]
+pub fn migrate_legacy_entry() -> Result<bool, StartupError> {
+    Err(StartupError::UnsupportedPlatform)
 }
 
 #[cfg(windows)]
@@ -174,6 +236,39 @@ mod tests {
             r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe" --placeholder-transport"#,
             executable,
         ));
+    }
+
+    /// Spec #8: a flagged entry left by a preview is rewritten to the plain
+    /// path as soon as the tray reconciles its startup state, not only on a
+    /// later toggle. The registry step itself is Windows-only; the decision
+    /// is pure and tested here.
+    #[test]
+    fn legacy_run_entry_is_rewritten_to_the_plain_path() {
+        let executable = Path::new(r"C:\Razer Battery\RazerBatteryTaskbar-Native.exe");
+        let plain = r#""C:\Razer Battery\RazerBatteryTaskbar-Native.exe""#;
+        let legacy = r#""C:\Razer Battery\RazerBatteryTaskbar-Native.exe" --experimental-hid-00b7"#;
+        let foreign = r#""C:\Elsewhere\RazerBatteryTaskbar-Native.exe" --experimental-hid-00b7"#;
+
+        assert_eq!(
+            classify_registered_command(legacy, executable),
+            RegisteredCommand::Legacy
+        );
+        assert_eq!(
+            classify_registered_command(plain, executable),
+            RegisteredCommand::Current
+        );
+        assert_eq!(
+            classify_registered_command(foreign, executable),
+            RegisteredCommand::Other
+        );
+
+        assert_eq!(
+            migrated_command(legacy, executable).unwrap(),
+            Some(plain.to_string())
+        );
+        assert_eq!(migrated_command(plain, executable).unwrap(), None);
+        assert_eq!(migrated_command(foreign, executable).unwrap(), None);
+        assert_eq!(LEGACY_HID_FLAG, "--experimental-hid-00b7");
     }
 
     #[test]

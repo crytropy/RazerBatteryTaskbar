@@ -337,9 +337,10 @@ the HID transport is the default, no launch flag is ever written.
 
 Run entries created by earlier previews may still end in
 `--experimental-hid-00b7`. Such an entry is recognised as "enabled" on
-startup (so the toggle shows the real registration state) and is replaced
-with the plain executable path the next time the toggle is switched on.
-Until then the flag is harmless: the process accepts it as a no-op.
+startup (so the toggle shows the real registration state) and is rewritten
+to the plain executable path at that same startup, so the next toggle or
+Windows login already uses the flag-free command. Should the rewrite fail,
+the flag is harmless: the process accepts it as a no-op.
 
 A copied/moved executable may require the startup toggle to be re-enabled
 to update the registered path. The executable should be kept in its

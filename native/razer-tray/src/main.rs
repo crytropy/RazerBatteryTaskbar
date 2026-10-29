@@ -130,8 +130,7 @@ enum LaunchOptions {
     Help,
 }
 
-/// Retired opt-in flag from the preview builds; accepted as a no-op.
-const LEGACY_HID_FLAG: &str = "--experimental-hid-00b7";
+use startup::LEGACY_HID_FLAG;
 const PLACEHOLDER_FLAG: &str = "--placeholder-transport";
 
 fn parse_launch_options(args: &[String]) -> Result<LaunchOptions, String> {
@@ -539,16 +538,23 @@ fn load_settings() -> (Option<SettingsStore>, AppSettings) {
 
 fn reconcile_startup_setting(store: Option<&SettingsStore>, settings: &mut AppSettings) {
     match startup::is_enabled() {
-        Ok(enabled) if enabled != settings.start_with_windows => {
-            settings.start_with_windows = enabled;
+        Ok(enabled) => {
+            if enabled != settings.start_with_windows {
+                settings.start_with_windows = enabled;
 
-            if let Some(store) = store
-                && let Err(error) = store.save(settings)
-            {
-                eprintln!("failed to reconcile start-with-Windows setting: {error}");
+                if let Some(store) = store
+                    && let Err(error) = store.save(settings)
+                {
+                    eprintln!("failed to reconcile start-with-Windows setting: {error}");
+                }
+            }
+
+            // A Run entry left by a preview still carries the retired flag;
+            // rewrite it to the plain path now rather than on a later toggle.
+            if enabled && let Err(error) = startup::migrate_legacy_entry() {
+                eprintln!("failed to rewrite the legacy start-with-Windows entry: {error}");
             }
         }
-        Ok(_) => {}
         Err(error) => {
             eprintln!("failed to read start-with-Windows registration: {error}");
         }
