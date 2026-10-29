@@ -32,7 +32,9 @@ where
         .spawn(move || {
             let mut elapsed = Duration::ZERO;
             for tick in RecoveryTick::series(generation) {
-                let delay = tick.delay();
+                let Some(delay) = tick.delay() else {
+                    continue;
+                };
                 thread::sleep(delay.saturating_sub(elapsed));
                 elapsed = delay;
                 deliver(tick);
@@ -52,11 +54,13 @@ pub const RECOVERY_DELAYS: [Duration; 3] = [
 ];
 
 /// One scheduled recovery refresh. `generation` identifies the resume that
-/// produced it so ticks from a superseded resume are ignored.
+/// produced it so ticks from a superseded resume are ignored. `attempt`
+/// indexes [`RECOVERY_DELAYS`]; only [`RecoveryTick::series`] mints ticks,
+/// so it is always in range, and the accessors tolerate a stray value anyway.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecoveryTick {
     pub generation: u64,
-    pub attempt: usize,
+    attempt: usize,
 }
 
 impl RecoveryTick {
@@ -70,8 +74,15 @@ impl RecoveryTick {
             .collect()
     }
 
-    pub fn delay(&self) -> Duration {
-        RECOVERY_DELAYS[self.attempt]
+    /// Offset from the resume event, or `None` for an attempt outside the
+    /// schedule (such a tick is ignored rather than panicking).
+    pub fn delay(&self) -> Option<Duration> {
+        RECOVERY_DELAYS.get(self.attempt).copied()
+    }
+
+    /// Whether this is the final attempt of its series.
+    pub fn is_last(&self) -> bool {
+        self.attempt + 1 == RECOVERY_DELAYS.len()
     }
 }
 
@@ -114,10 +125,10 @@ impl ResumeRecovery {
         let Some(active) = self.active.as_mut() else {
             return false;
         };
-        if active.generation != tick.generation {
+        if active.generation != tick.generation || tick.delay().is_none() {
             return false;
         }
-        if tick.attempt + 1 == RECOVERY_DELAYS.len() {
+        if tick.is_last() {
             active.last_attempt_fired = true;
         }
         true
@@ -316,6 +327,35 @@ mod tests {
         assert!(!recovery.on_tick(first[2]));
         assert!(recovery.on_tick(second[0]));
         assert!(recovery.is_active());
+    }
+
+    #[test]
+    fn an_out_of_range_attempt_has_no_delay_and_never_refreshes() {
+        // Only `series` mints ticks, but a stray value must not panic the
+        // helper thread or trigger a refresh.
+        let stray = RecoveryTick {
+            generation: 1,
+            attempt: RECOVERY_DELAYS.len(),
+        };
+        assert_eq!(stray.delay(), None);
+        assert!(!stray.is_last());
+
+        let mut recovery = ResumeRecovery::default();
+        recovery.on_resume(1);
+        assert!(!recovery.on_tick(stray));
+        assert!(recovery.is_active());
+
+        let series = RecoveryTick::series(1);
+        assert_eq!(
+            series.iter().map(RecoveryTick::delay).collect::<Vec<_>>(),
+            RECOVERY_DELAYS
+                .iter()
+                .copied()
+                .map(Some)
+                .collect::<Vec<_>>()
+        );
+        assert!(series.last().unwrap().is_last());
+        assert!(!series[0].is_last());
     }
 
     #[test]
