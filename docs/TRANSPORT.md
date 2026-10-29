@@ -9,6 +9,17 @@ The transport also listens for node-usb attach/detach events and emits one debou
 ## Reconnect behavior
 
 - Supported USB attach/detach events request an immediate rescan.
+  - Electron: node-usb attach/detach events, debounced into one transport
+    change event.
+  - Native tray: a cfgmgr32 device-interface notification
+    (`CM_Register_Notification`, `GUID_DEVINTERFACE_HID`) filtered to Razer
+    interfaces (`VID_1532` in the device path). The burst of interface events
+    from one unplug/replug is debounced for 1.5 s into a single worker rescan,
+    followed by one settle rescan 3 s later because the mouse re-pairs with a
+    freshly plugged receiver. Expected worst case is therefore about 2 s for an
+    unplug and about 2-5 s for a replug. Measured latency: not yet recorded;
+    the #13 hardware run (unplug ≤ 5 s, replug ≤ 5 s with battery updated)
+    is still pending and should replace this sentence with the numbers.
 - Windows resume requests a rescan after a short settle delay.
 - A transport-wide enumeration failure retries after 2 seconds.
 - Existing devices are only marked disconnected after three consecutive enumeration failures.
@@ -24,8 +35,8 @@ Measured on a DeathAdder V3 Pro receiver (`1532:00B7`) with the native tray in
 
 | Scenario | Result | Follow-up |
 | --- | --- | --- |
-| Receiver unplugged | `connected=false` within one 60 s poll; no false transport errors | #13 (USB detach does not force an immediate rescan) |
-| Receiver re-plugged | Battery restored within one poll; once faster, likely via the attach event | #13 |
+| Receiver unplugged | `connected=false` within one 60 s poll; no false transport errors | #13 (USB detach did not force an immediate rescan; device-change rescan now implemented, latency retest pending) |
+| Receiver re-plugged | Battery restored within one poll; once faster, likely via the attach event | #13 (same retest) |
 | Windows sleep → wake | Recovers automatically; the +0 s / +3 s resume refreshes fire before the mouse re-pairs, so the real update waited for the next poll (~64 s) | #12 (stagger resume refreshes) |
 | Idle mouse sleep → wake | Battery refreshed within ~13 s; last value retained while asleep (`deviceNotResponding`) | — |
 | Windows hibernate → wake | Repeatedly failed, but the tray had been started at logon without the opt-in flag and was in placeholder mode all day, so no battery read was possible regardless of hibernate. Retest after the flag is retired | #16, gated on #8 |

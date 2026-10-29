@@ -174,6 +174,29 @@ version, but reported a delay. This change is intended to shorten that
 delay; it still requires real-device testing on Windows.
 
 
+## USB device-change notifications
+
+Waiting for the next 60-second poll made an unplugged receiver look connected
+for up to a minute. The native tray now registers a cfgmgr32 device-interface
+notification (`CM_Register_Notification` with `GUID_DEVINTERFACE_HID`,
+`native/razer-tray/src/device_events.rs`). Like the suspend/resume callback it
+needs no window and is delivered on a system thread.
+
+The callback only looks at the vendor ID in the interface path, so plugging
+in an unrelated keyboard does not trigger a rescan. One unplug or replug
+produces several interface arrival/removal events; a pure debounce state
+machine collapses them into a single refresh request 1.5 s after the last
+event, plus one settle refresh 3 s later so the mouse has time to re-pair
+with a replugged receiver. The refresh is posted to the `winit` event loop as
+`UserEvent::DeviceChange` and from there to the background worker, which
+coalesces it with any pending poll. No HID handle is ever opened on the
+callback, timer or UI thread.
+
+If registration fails the tray logs the error and normal scheduled polling
+remains the fallback. The debounce logic and the worker coalescing are unit
+tested without hardware; the ≤ 5 s unplug / replug latency still needs a
+real-device run (issue #13).
+
 ## HID read errors versus actual receiver disconnection
 
 The experimental Windows transport now classifies problems at the source:
