@@ -50,14 +50,13 @@ impl From<io::Error> for StartupError {
     }
 }
 
-pub fn build_startup_command(
-    executable: &Path,
-    experimental_hid: bool,
-) -> Result<String, StartupError> {
-    let mut command = format!("\"{}\"", executable.display());
-    if experimental_hid {
-        command.push_str(" --experimental-hid-00b7");
-    }
+/// Command-line suffix written by previews before the Windows HID transport
+/// became the default. Such entries are still recognised as "enabled" and are
+/// replaced with the plain executable path the next time startup is enabled.
+const LEGACY_HID_FLAG_SUFFIX: &str = " --experimental-hid-00b7";
+
+pub fn build_startup_command(executable: &Path) -> Result<String, StartupError> {
+    let command = format!("\"{}\"", executable.display());
     let length = command.encode_utf16().count();
 
     if length > MAX_RUN_COMMAND_CHARS {
@@ -67,29 +66,39 @@ pub fn build_startup_command(
     Ok(command)
 }
 
+/// Whether an existing Run entry refers to `executable`, either as the plain
+/// quoted path or as a legacy entry carrying the retired opt-in flag.
+pub fn registered_command_matches(command: &str, executable: &Path) -> bool {
+    let expected = format!("\"{}\"", executable.display());
+    command == expected
+        || command
+            .strip_suffix(LEGACY_HID_FLAG_SUFFIX)
+            .is_some_and(|prefix| prefix == expected)
+}
+
 #[cfg(windows)]
-pub fn is_enabled(experimental_hid: bool) -> Result<bool, StartupError> {
+pub fn is_enabled() -> Result<bool, StartupError> {
     use windows_registry::CURRENT_USER;
 
-    let expected = build_startup_command(&std::env::current_exe()?, experimental_hid)?;
+    let executable = std::env::current_exe()?;
     let key = match CURRENT_USER.open(RUN_KEY) {
         Ok(key) => key,
         Err(_) => return Ok(false),
     };
 
     match key.get_string(VALUE_NAME) {
-        Ok(command) => Ok(command == expected),
+        Ok(command) => Ok(registered_command_matches(&command, &executable)),
         Err(_) => Ok(false),
     }
 }
 
 #[cfg(not(windows))]
-pub fn is_enabled(_experimental_hid: bool) -> Result<bool, StartupError> {
+pub fn is_enabled() -> Result<bool, StartupError> {
     Err(StartupError::UnsupportedPlatform)
 }
 
 #[cfg(windows)]
-pub fn set_enabled(enabled: bool, experimental_hid: bool) -> Result<(), StartupError> {
+pub fn set_enabled(enabled: bool) -> Result<(), StartupError> {
     use windows_registry::CURRENT_USER;
 
     let key = CURRENT_USER
@@ -97,7 +106,7 @@ pub fn set_enabled(enabled: bool, experimental_hid: bool) -> Result<(), StartupE
         .map_err(|error| StartupError::Registry(error.to_string()))?;
 
     if enabled {
-        let command = build_startup_command(&std::env::current_exe()?, experimental_hid)?;
+        let command = build_startup_command(&std::env::current_exe()?)?;
         key.set_string(VALUE_NAME, command)
             .map_err(|error| StartupError::Registry(error.to_string()))?;
     } else if key.get_string(VALUE_NAME).is_ok() {
@@ -109,7 +118,7 @@ pub fn set_enabled(enabled: bool, experimental_hid: bool) -> Result<(), StartupE
 }
 
 #[cfg(not(windows))]
-pub fn set_enabled(_enabled: bool, _experimental_hid: bool) -> Result<(), StartupError> {
+pub fn set_enabled(_enabled: bool) -> Result<(), StartupError> {
     Err(StartupError::UnsupportedPlatform)
 }
 
@@ -119,46 +128,68 @@ mod tests {
 
     #[test]
     fn startup_command_quotes_paths_with_spaces() {
-        let command = build_startup_command(
-            Path::new(r"C:\Program Files\RazerBattery\razer-tray.exe"),
-            false,
-        )
-        .unwrap();
+        let command =
+            build_startup_command(Path::new(r"C:\Program Files\RazerBattery\razer-tray.exe"))
+                .unwrap();
 
         assert_eq!(command, r#""C:\Program Files\RazerBattery\razer-tray.exe""#);
     }
 
     #[test]
-    fn startup_command_requires_explicit_opt_in_to_persist_experimental_hid() {
+    fn startup_command_registers_only_the_executable_path() {
         let executable = Path::new(r"C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe");
-        let default = build_startup_command(executable, false).unwrap();
-        let experimental = build_startup_command(executable, true).unwrap();
+        let command = build_startup_command(executable).unwrap();
 
         assert_eq!(
-            default,
+            command,
             r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe""#
         );
-        assert_eq!(
-            experimental,
-            r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe" --experimental-hid-00b7"#
-        );
-        assert!(!default.contains("--experimental-hid-00b7"));
+        assert!(!command.contains("--"));
     }
 
     #[test]
     fn startup_command_rejects_values_over_the_windows_run_limit() {
         let long_name = "a".repeat(MAX_RUN_COMMAND_CHARS + 1);
-        let error = build_startup_command(Path::new(&long_name), false).unwrap_err();
+        let error = build_startup_command(Path::new(&long_name)).unwrap_err();
 
         assert!(matches!(error, StartupError::CommandTooLong(_)));
 
-        // The opt-in flag counts toward the Windows command-line length.
-        let fits_without_flag = "a".repeat(MAX_RUN_COMMAND_CHARS - 2);
-        let executable = Path::new(&fits_without_flag);
-        assert!(build_startup_command(executable, false).is_ok());
-        assert!(matches!(
-            build_startup_command(executable, true),
-            Err(StartupError::CommandTooLong(_))
+        let fits_exactly = "a".repeat(MAX_RUN_COMMAND_CHARS - 2);
+        assert!(build_startup_command(Path::new(&fits_exactly)).is_ok());
+    }
+
+    #[test]
+    fn registered_command_matches_current_executable() {
+        let executable = Path::new(r"C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe");
+
+        assert!(registered_command_matches(
+            r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe""#,
+            executable,
         ));
+        assert!(!registered_command_matches(
+            r#""C:\Elsewhere\RazerBatteryTaskbar-Native-Preview.exe""#,
+            executable,
+        ));
+        assert!(!registered_command_matches(
+            r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe" --placeholder-transport"#,
+            executable,
+        ));
+    }
+
+    #[test]
+    fn legacy_run_entry_with_retired_hid_flag_still_counts_as_enabled() {
+        // Entries written by earlier previews carried the opt-in flag. They must
+        // read as "enabled" so the toggle can overwrite them with the plain path.
+        let executable = Path::new(r"C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe");
+
+        assert!(registered_command_matches(
+            r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe" --experimental-hid-00b7"#,
+            executable,
+        ));
+        assert_eq!(
+            build_startup_command(executable).unwrap(),
+            r#""C:\Razer Battery\RazerBatteryTaskbar-Native-Preview.exe""#,
+            "re-enabling startup must write the plain path, not the legacy flag"
+        );
     }
 }
