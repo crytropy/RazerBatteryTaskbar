@@ -30,11 +30,11 @@ It does not parse Razer packets, enumerate HID collections, or know device seria
 
 ### Primary device
 
-The right-click menu has a `Primary device` submenu directly under the status line. It lists `Automatic` plus one entry per currently connected Razer device, named from the device database; the active choice is checked. With one device attached the submenu still shows that single device. The entries are rebuilt from every core snapshot, so a device that is plugged in appears on the next poll or device-change rescan and an unplugged device disappears.
+The right-click menu has a `Primary device` submenu directly under the status line. It lists `Automatic` plus one entry per currently connected Razer device, named as in the core snapshot; the active choice is checked. Under `Automatic` the device the icon currently shows carries a `(current)` marker, so the automatic pick is always visible. With one device attached the submenu still shows that single device. The entries are rebuilt from every core snapshot, so a device that is plugged in appears on the next poll or device-change rescan and an unplugged device disappears.
 
 Picking a device sends the preference to the running worker, which answers with a snapshot built from the devices it already knows; the icon, tooltip and `/v1/status` switch at once and no extra HID handle is opened. The choice is stored as `primaryDevice` in `settings.json` (see [SETTINGS.md](SETTINGS.md)) and applied again at the next start.
 
-The preference is keyed on the Razer product ID. When the preferred device is unplugged the core falls back to its default ordering (Mouse → Headset → Dock → Dongle → Unknown); the submenu keeps the preferred device visible as a disabled, checked `… (disconnected)` entry so the fallback is explicit, and the preference takes over again as soon as the device reconnects. `Automatic` returns to the default ordering.
+The preference is keyed on the Razer product ID. When the preferred device is unplugged the core falls back to its default ordering (Mouse → Headset → Dock → Dongle → Unknown); the submenu keeps the preferred device visible as a disabled, checked `… (disconnected)` entry and marks the fallback device `(current)`, so the fallback is explicit, and the preference takes over again as soon as the device reconnects. `Automatic` returns to the default ordering. A preference saved for the wired product ID of a paired mouse (`00B6` for the DeathAdder V3 Pro on its cable) is resolved to the logical device (`00B7`) at startup and saved back, so it matches the entry the core reports.
 
 ### Settings
 

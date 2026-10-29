@@ -21,7 +21,7 @@ use notify_rust::{Notification, Urgency};
 use polling::{CoreUpdate, CoreWorker};
 #[cfg(windows)]
 use power_events::PowerNotifications;
-use primary_device_menu::PrimaryDeviceMenu;
+use primary_device_menu::{PrimaryDeviceMenu, canonical_preference};
 use razer_core::frontend::FrontendSnapshot;
 #[cfg(test)]
 use razer_core::frontend::PollStatistics;
@@ -157,6 +157,19 @@ fn print_help() {
     println!("Starts with the native Windows HID battery transport by default.");
     println!("  {PLACEHOLDER_FLAG}   debug only: run without any battery transport");
     println!("  {LEGACY_HID_FLAG}  retired; accepted as a no-op");
+}
+
+/// Resolve a saved primary-device preference to the canonical product ID the
+/// core reports (the wired twin `00B6` becomes `00B7`). Returns `true` when
+/// the settings were changed.
+fn canonicalize_primary_device(settings: &mut AppSettings) -> bool {
+    let canonical = canonical_preference(&settings.primary_device);
+    if canonical == settings.primary_device {
+        return false;
+    }
+
+    settings.primary_device = canonical;
+    true
 }
 
 /// Raise a saved poll interval to the Windows HID transport's minimum.
@@ -720,11 +733,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (settings_store, mut settings) = load_settings();
     reconcile_startup_setting(settings_store.as_ref(), &mut settings);
 
-    if clamp_poll_interval(&mut settings)
+    let clamped = clamp_poll_interval(&mut settings);
+    let canonicalized = canonicalize_primary_device(&mut settings);
+    if (clamped || canonicalized)
         && let Some(store) = settings_store.as_ref()
         && let Err(error) = store.save(&settings)
     {
-        eprintln!("failed to persist clamped poll interval: {error}");
+        eprintln!("failed to persist normalized settings: {error}");
     }
 
     let transport = transport_choice.into_transport()?;
@@ -987,6 +1002,23 @@ mod tests {
         };
         assert!(!clamp_poll_interval(&mut settings));
         assert_eq!(settings.poll_interval_seconds, 300);
+    }
+
+    #[test]
+    fn saved_wired_twin_preference_is_rewritten_to_the_canonical_product_id() {
+        let mut settings = AppSettings {
+            primary_device: PrimaryDevicePreference::ProductId(0x00B6),
+            ..AppSettings::default()
+        };
+        assert!(canonicalize_primary_device(&mut settings));
+        assert_eq!(
+            settings.primary_device,
+            PrimaryDevicePreference::ProductId(0x00B7)
+        );
+
+        assert!(!canonicalize_primary_device(&mut settings));
+        let mut automatic = AppSettings::default();
+        assert!(!canonicalize_primary_device(&mut automatic));
     }
 
     #[test]
