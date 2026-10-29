@@ -36,15 +36,15 @@ Rust 原生系統匣已經能以輕量 Windows 系統匣程式的形式執行，
 - 唯讀的本機整合 API；
 - 可選的 Seelen UI 轉接器。
 
-**預設啟動仍使用佔位（placeholder）傳輸層。** 一次性電量讀取已在真實的 DeathAdder V3 Pro 接收器（1532:00B7）上成功，並提供一個**需明確啟用的實驗性**傳輸層來查詢這一款裝置。其他硬體尚未啟用。在同一顆接收器上，持續輪詢、拔插／睡眠喚醒後的自動重連、以及滑鼠休眠時的處理（保留上次電量）都已經過數小時的實機驗證；與 Synapse 共存則尚未驗證。
+**預設啟動即使用原生 Windows HID 傳輸層（`windows-hid`），不需要任何參數。** 目前支援的硬體為 DeathAdder V3 Pro 接收器（1532:00B7）；其他硬體尚未啟用（#18）。在這顆接收器上，持續輪詢、拔插／睡眠喚醒後的自動重連、以及滑鼠休眠時的處理（保留上次電量）都已經過數小時的實機驗證；與 Synapse 共存則尚未驗證。沒有接上接收器時程式仍會正常啟動，托盤顯示未偵測到裝置。
 
-解壓縮原生預覽版後，先關閉 Synapse 與 Razer 相關服務，再執行：
+解壓縮原生預覽版後，先關閉 Synapse 與 Razer 相關服務，再直接執行：
 
 ```powershell
-.\RazerBatteryTaskbar-Native-Preview.exe --experimental-hid-00b7
+.\RazerBatteryTaskbar-Native-Preview.exe
 ```
 
-這個模式會在啟動時送出一次電量查詢，之後每次查詢至少間隔 60 秒。不帶參數執行時仍然只有佔位傳輸層。使用前請先閱讀 [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md)。
+程式會在啟動時送出一次電量查詢，之後每次查詢至少間隔 60 秒（輪詢間隔選單只提供 1 分鐘與 5 分鐘，舊設定檔中較短的間隔會在啟動時提高到 60 秒）。舊的 `--experimental-hid-00b7` 參數仍可接受，但只是 no-op；`--placeholder-transport` 則是沒有硬體時用來測試介面的除錯選項。使用前請先閱讀 [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md)。
 
 最新預覽版可從 **Rust Native Preview** 工作流程的 artifact 取得：
 

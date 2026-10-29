@@ -3,13 +3,12 @@ use std::error::Error;
 use razer_core::settings::AppSettings;
 use tray_icon::menu::{CheckMenuItem, MenuEvent, MenuItem, Submenu};
 
-const POLL_INTERVAL_OPTIONS: &[(u64, &str)] = &[
-    (5, "5 seconds"),
-    (15, "15 seconds"),
-    (30, "30 seconds"),
-    (60, "1 minute"),
-    (300, "5 minutes"),
-];
+/// Shortest polling interval the tray offers. The Windows HID transport opens
+/// its handle per query and waits 500 ms for the reply, so ADR-0001 fixes its
+/// minimum at 60 s; the menu never exposes anything shorter.
+pub const MIN_POLL_INTERVAL_SECONDS: u64 = 60;
+
+const POLL_INTERVAL_OPTIONS: &[(u64, &str)] = &[(60, "1 minute"), (300, "5 minutes")];
 
 const LOW_BATTERY_OPTIONS: &[(u8, &str)] = &[
     (10, "10%"),
@@ -32,7 +31,7 @@ pub struct SettingsMenu {
 }
 
 impl SettingsMenu {
-    pub fn new(settings: &AppSettings, experimental_hid: bool) -> Result<Self, Box<dyn Error>> {
+    pub fn new(settings: &AppSettings) -> Result<Self, Box<dyn Error>> {
         let root = Submenu::with_id("settings", "Settings", true);
 
         let notifications_item = CheckMenuItem::with_id(
@@ -99,7 +98,7 @@ impl SettingsMenu {
                 let item = CheckMenuItem::with_id(
                     format!("settings.poll-interval.{seconds}"),
                     label,
-                    !experimental_hid || *seconds >= 60,
+                    true,
                     settings.poll_interval_seconds == *seconds,
                     None,
                 );
@@ -196,6 +195,23 @@ mod tests {
             };
             settings.validate().unwrap();
         }
+    }
+
+    #[test]
+    fn polling_options_never_go_below_the_hid_transport_minimum() {
+        assert!(!POLL_INTERVAL_OPTIONS.is_empty());
+        for (seconds, _) in POLL_INTERVAL_OPTIONS {
+            assert!(
+                *seconds >= MIN_POLL_INTERVAL_SECONDS,
+                "{seconds} s is below the 60 s minimum of the Windows HID transport"
+            );
+        }
+        assert!(
+            POLL_INTERVAL_OPTIONS
+                .iter()
+                .any(|(seconds, _)| *seconds == MIN_POLL_INTERVAL_SECONDS),
+            "the minimum itself must be selectable"
+        );
     }
 
     #[test]

@@ -36,9 +36,9 @@ The Electron application remains the usable compatibility runtime while the Rust
 
 The Rust core contains protocol handling, the shared device database, normalized state, multi-device management, events, transport abstraction, the core service, privacy-safe frontend snapshots, a versioned integration JSON contract, persistent settings, and notification policy.
 
-The experimental `windows-hid-00b7-experimental` transport can be explicitly enabled with `--experimental-hid-00b7`. Normal startup remains on the placeholder transport until repeated-read, reconnect, and Synapse coexistence testing is complete.
+The Windows HID transport (`windows-hid`) is the default startup path of the native tray (#8). The retired `--experimental-hid-00b7` flag is accepted as a no-op; `--placeholder-transport` is a debug option for runs without hardware. Synapse coexistence remains a known limitation (ADR-0001).
 
-The native tray shell lives in `native/razer-tray`. It owns the Windows event loop, system tray icon/menu, settings persistence integration, notification threshold controls, Windows notification adapter, per-user startup registration, single-instance protection, and a read-only loopback status API. A single background worker owns the entire Rust core and HID transport, leaving the UI thread free of device I/O. Default startup uses the placeholder transport; the explicit 00B7 experimental flag enables native HID.
+The native tray shell lives in `native/razer-tray`. It owns the Windows event loop, system tray icon/menu, settings persistence integration, notification threshold controls, Windows notification adapter, per-user startup registration, single-instance protection, and a read-only loopback status API. A single background worker owns the entire Rust core and HID transport, leaving the UI thread free of device I/O. Default startup uses the native Windows HID transport; the placeholder transport is reachable only through the `--placeholder-transport` debug flag.
 
 ## Phase 7 hardware validation
 
