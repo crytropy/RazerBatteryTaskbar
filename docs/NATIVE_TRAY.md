@@ -243,7 +243,9 @@ permanent location before enabling startup.
 
 `CoreService` now includes privacy-safe per-process poll counters and
 timestamp fields, exposed by `GET /v1/status` in `pollStatistics`.
-They record total attempts, successful/failed transport reads, the
+They record total attempts, successful reads, real transport failures
+(`failures`), reads where the device did not respond (`deviceNotResponding`,
+usually an idle or sleeping mouse, counted apart from `failures`), the
 most recent successful scan, the most recent scan that returned
 battery data, and the most recent read duration. No persistent
 telemetry log, third-party network request, serial number, or
@@ -252,3 +254,11 @@ HID path is introduced.
 After confirming that the experimental 00B7 transport can poll correctly,
 use the read-only local status endpoint to watch success/failure counts over
 a longer session. The counters reset when the EXE is restarted.
+`attempts = successes + failures + deviceNotResponding` always holds.
+
+A 16.5 hour run (2026-10-23 to 2026-10-24, issue #5) recorded 440 attempts and
+341 successes. The other 99 reads were all `deviceNotResponding` from the idle
+mouse, which the earlier counters reported as `failures`; there were no false
+disconnects and sleep/wake recovered automatically. Razer Synapse was not
+installed, so coexistence is untested. The full validation table is in
+[TRANSPORT.md](TRANSPORT.md).
