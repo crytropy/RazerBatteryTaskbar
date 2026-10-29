@@ -4,6 +4,7 @@ mod api;
 mod polling;
 #[cfg(windows)]
 mod power_events;
+mod resume_recovery;
 mod settings_menu;
 mod startup;
 
