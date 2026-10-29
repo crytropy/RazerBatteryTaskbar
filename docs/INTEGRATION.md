@@ -22,6 +22,7 @@ Example:
     "attempts": 10,
     "successes": 9,
     "failures": 1,
+    "deviceNotResponding": 0,
     "lastSuccessfulScanUnixMs": 1791500000000,
     "lastBatteryReadUnixMs": 1791500000000,
     "lastDurationMs": 501
@@ -147,10 +148,19 @@ reset whenever the native tray process starts:
 
 - `attempts`: calls into the selected transport;
 - `successes`: transport reads which returned without an error, even if no receiver was present;
-- `failures`: transport reads that returned an error;
+- `failures`: transport reads that returned a real error (`enumeration`, `open`,
+  `send`, `receive`, `invalidResponse`, `configuration` or `unknown`);
+- `deviceNotResponding`: transport reads where the device answered busy / failure /
+  timeout, which is what an idle or sleeping wireless mouse does. These are not
+  counted in `failures`, so `attempts = successes + failures + deviceNotResponding`;
 - `lastSuccessfulScanUnixMs`: timestamp of the most recent successful device scan;
 - `lastBatteryReadUnixMs`: timestamp of the most recent successful scan which returned a battery percentage;
 - `lastDurationMs`: elapsed time for the most recent attempt, including any HID report response delay.
+
+`deviceNotResponding` was added to `pollStatistics` without changing the
+schema version, because the field is additive; `failures` and every other
+existing field keep their names, but `failures` no longer includes
+`deviceNotResponding` reads.
 
 Times are UTC Unix epoch milliseconds. Timestamps are `null` until that event
 occurs. Counts reset on application restart and are not persisted to disk.

@@ -188,19 +188,32 @@ coexistence pass real-device testing.
 Windows can send `PBT_APMRESUMEAUTOMATIC` and then
 `PBT_APMRESUMESUSPEND` for the same wake. The native tray registers a
 Windows suspend/resume callback; it deduplicates resume messages received
-within four seconds, then asks the background battery worker to refresh
-immediately. A second refresh is scheduled three seconds later, allowing
-the USB receiver time to re-enumerate before retrying.
+within four seconds, so each wake schedules exactly one set of recovery
+refreshes.
 
-The event callback never opens an HID handle and never blocks the UI event
-loop. If power notification registration fails, normal scheduled polling
-remains available as a fallback. The existing experimental 60-second
-interval remains unchanged for ordinary polling; recovery refreshes are
-only sent after an actual Windows resume event.
+Real-device testing showed that the DeathAdder V3 Pro and its receiver need
+more than three seconds to re-pair after a wake, so refreshes fired too
+early only returned `deviceNotResponding`. Recovery refreshes are therefore
+staggered at **+3 s, +10 s and +20 s** after the resume event. The first
+refresh that produces a real battery read (a successful transport read with
+the primary device connected and reporting a battery level) cancels the
+remaining attempts. If all three fail, the tray gives up on recovery and the
+ordinary scheduled polling takes over unchanged; the device stays
+`connected` and the last known battery level is retained, exactly as for
+any other `deviceNotResponding` failure. A second wake that arrives after
+the four-second window replaces the pending set rather than adding to it.
 
-The user has confirmed successful resume recovery with the earlier polling
-version, but reported a delay. This change is intended to shorten that
-delay; it still requires real-device testing on Windows.
+The power callback and the timer thread never open an HID handle and never
+block the UI event loop; they only post events to it, and the refreshes run
+on the background battery worker like every other read. If power
+notification registration fails, normal scheduled polling remains available
+as a fallback. The existing experimental 60-second interval remains
+unchanged for ordinary polling; recovery refreshes are only sent after an
+actual Windows resume event.
+
+The scheduler is covered by fake-transport unit tests for both paths
+(second attempt succeeds; all attempts fail). The end-to-end timing still
+requires real-device testing on Windows.
 
 
 ## HID read errors versus actual receiver disconnection
@@ -259,7 +272,9 @@ permanent location before enabling startup.
 
 `CoreService` now includes privacy-safe per-process poll counters and
 timestamp fields, exposed by `GET /v1/status` in `pollStatistics`.
-They record total attempts, successful/failed transport reads, the
+They record total attempts, successful reads, real transport failures
+(`failures`), reads where the device did not respond (`deviceNotResponding`,
+usually an idle or sleeping mouse, counted apart from `failures`), the
 most recent successful scan, the most recent scan that returned
 battery data, and the most recent read duration. No persistent
 telemetry log, third-party network request, serial number, or
@@ -268,3 +283,11 @@ HID path is introduced.
 After confirming that the experimental 00B7 transport can poll correctly,
 use the read-only local status endpoint to watch success/failure counts over
 a longer session. The counters reset when the EXE is restarted.
+`attempts = successes + failures + deviceNotResponding` always holds.
+
+A 16.5 hour run (2026-10-23 to 2026-10-24, issue #5) recorded 440 attempts and
+341 successes. The other 99 reads were all `deviceNotResponding` from the idle
+mouse, which the earlier counters reported as `failures`; there were no false
+disconnects and sleep/wake recovered automatically. Razer Synapse was not
+installed, so coexistence is untested. The full validation table is in
+[TRANSPORT.md](TRANSPORT.md).
