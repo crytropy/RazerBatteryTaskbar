@@ -190,8 +190,20 @@ With the experimental transport running:
 
 Allow the tray to run normally for a longer session. The counter
 `attempts` should increase as refreshes occur, while `failures`
-should remain low. A `success` means that transport enumeration and its
+should remain low. `deviceNotResponding` is counted separately: it
+increases when the device answered busy / failure / timeout, which is
+expected while the mouse idles or sleeps, and it is not a transport
+failure. The invariant `attempts = successes + failures +
+deviceNotResponding` always holds. A `success` means that transport enumeration and its
 request completed, but it can also mean a successful empty-device scan.
 `lastBatteryReadUnixMs` is the better indicator that an actual battery
 percentage was returned. Report timestamps are UTC milliseconds since
 Unix epoch. Telemetry is session-only and excludes serials and HID paths.
+
+Result of the long-run check (issue #5, DeathAdder V3 Pro `1532:00B7`,
+`--experimental-hid-00b7`, 2026-10-23 to 2026-10-24, 16.5 hours):
+440 attempts, 341 successes and 99 reads counted as `failures`. All 99 were
+`deviceNotResponding` from the idle mouse (before this field existed), with
+no false disconnects. Sleep and wake recovered automatically. Razer Synapse
+was not installed, so coexistence was not tested. See the validation table in
+[TRANSPORT.md](TRANSPORT.md) for the full list of scenarios.
