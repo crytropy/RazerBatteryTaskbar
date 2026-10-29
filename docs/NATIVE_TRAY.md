@@ -120,6 +120,33 @@ visually distinct from a real 0% reading. This is a tray-only change:
 it does not modify HID polling, device connectivity, the read-only API,
 or the `transportHealthy` / `transportReady` status fields.
 
+### Charging display
+
+When the primary device reports `charging=true`, the tray draws a small
+lightning bolt inside the battery cell. The bolt is inverted against the
+fill (dark over the white filled part, white over the empty part) so it
+stays legible at 16×16 at every battery level. If the battery level is
+unknown while charging, the bolt replaces the question mark and is drawn
+slightly dimmed, so "charging, level unknown" is still distinct from
+"charging, 0%". When `charging` is `false` or `null` the icon is identical
+to the non-charging icon described above.
+
+The tooltip and the status menu item append ` — Charging` to the existing
+status string, for example `Razer Deathadder V3 Pro Wireless — 64.0% — Charging`
+or `Razer Deathadder V3 Pro Wireless — Battery unavailable — Charging`.
+Charging-state changes never trigger low-battery notifications
+(see [SETTINGS.md](SETTINGS.md)). The tray never parses the Razer
+protocol: it only renders the `charging` field of the frontend snapshot,
+which the Windows HID transport fills from a second feature query per poll
+(see [TRANSPORT.md](TRANSPORT.md)).
+
+Known limitation: a DeathAdder V3 Pro charging over its cable enumerates as
+the wired product ID `00B6`, which the transport does not read yet
+(ticket #18). Until then, plugging the cable in makes the wireless PID
+`00B7` disappear from enumeration, so the tray reports the mouse as
+disconnected rather than charging; the charging mark can only appear while
+the device is still enumerated as `00B7`.
+
 The worker is tested with a fake transport, without touching real hardware.
 Long-term HID reliability, physical reconnect behavior, and Windows sleep
 recovery still require real-device validation.
@@ -140,10 +167,11 @@ Start it from PowerShell with no arguments:
 ```
 
 The transport sends a battery query on launch and then at intervals of
-**at least 60 seconds**. It opens a handle for a single query, releases it,
-and does not change the Windows driver or mouse settings. With no matching
-receiver attached, reads succeed with an empty device list and the tray shows
-`No supported Razer devices detected`.
+**at least 60 seconds**. It opens a handle once per poll, sends the battery
+query followed by the charging-status query on that handle, then releases
+it, and does not change the Windows driver or mouse settings. With no
+matching receiver attached, reads succeed with an empty device list and the
+tray shows `No supported Razer devices detected`.
 
 It stops reporting a stale reading when transport health fails, and marks
 the device disconnected after the core's existing three-failure threshold.
@@ -164,20 +192,56 @@ Debug options:
 Windows can send `PBT_APMRESUMEAUTOMATIC` and then
 `PBT_APMRESUMESUSPEND` for the same wake. The native tray registers a
 Windows suspend/resume callback; it deduplicates resume messages received
-within four seconds, then asks the background battery worker to refresh
-immediately. A second refresh is scheduled three seconds later, allowing
-the USB receiver time to re-enumerate before retrying.
+within four seconds, so each wake schedules exactly one set of recovery
+refreshes.
 
-The event callback never opens an HID handle and never blocks the UI event
-loop. If power notification registration fails, normal scheduled polling
-remains available as a fallback. The configured polling interval (60 s
-minimum) remains unchanged for ordinary polling; recovery refreshes are
-only sent after an actual Windows resume event.
+Real-device testing showed that the DeathAdder V3 Pro and its receiver need
+more than three seconds to re-pair after a wake, so refreshes fired too
+early only returned `deviceNotResponding`. Recovery refreshes are therefore
+staggered at **+3 s, +10 s and +20 s** after the resume event. The first
+refresh that produces a real battery read (a successful transport read with
+the primary device connected and reporting a battery level) cancels the
+remaining attempts. If all three fail, the tray gives up on recovery and the
+ordinary scheduled polling takes over unchanged; the device stays
+`connected` and the last known battery level is retained, exactly as for
+any other `deviceNotResponding` failure. A second wake that arrives after
+the four-second window replaces the pending set rather than adding to it.
 
-The user has confirmed successful resume recovery with the earlier polling
-version, but reported a delay. This change is intended to shorten that
-delay; it still requires real-device testing on Windows.
+The power callback and the timer thread never open an HID handle and never
+block the UI event loop; they only post events to it, and the refreshes run
+on the background battery worker like every other read. If power
+notification registration fails, normal scheduled polling remains available
+as a fallback. The configured polling interval (60 s minimum) remains
+unchanged for ordinary polling; recovery refreshes are only sent after an
+actual Windows resume event.
 
+The scheduler is covered by fake-transport unit tests for both paths
+(second attempt succeeds; all attempts fail). The end-to-end timing still
+requires real-device testing on Windows.
+
+
+## USB device-change notifications
+
+Waiting for the next 60-second poll made an unplugged receiver look connected
+for up to a minute. The native tray now registers a cfgmgr32 device-interface
+notification (`CM_Register_Notification` with `GUID_DEVINTERFACE_HID`,
+`native/razer-tray/src/device_events.rs`). Like the suspend/resume callback it
+needs no window and is delivered on a system thread.
+
+The callback only looks at the vendor ID in the interface path, so plugging
+in an unrelated keyboard does not trigger a rescan. One unplug or replug
+produces several interface arrival/removal events; a pure debounce state
+machine collapses them into a single refresh request 1.5 s after the last
+event, plus one settle refresh 3 s later so the mouse has time to re-pair
+with a replugged receiver. The refresh is posted to the `winit` event loop as
+`UserEvent::DeviceChange` and from there to the background worker, which
+coalesces it with any pending poll. No HID handle is ever opened on the
+callback, timer or UI thread.
+
+If registration fails the tray logs the error and normal scheduled polling
+remains the fallback. The debounce logic and the worker coalescing are unit
+tested without hardware; the ≤ 5 s unplug / replug latency still needs a
+real-device run (issue #13).
 
 ## HID read errors versus actual receiver disconnection
 
@@ -233,7 +297,9 @@ permanent location before enabling startup.
 
 `CoreService` now includes privacy-safe per-process poll counters and
 timestamp fields, exposed by `GET /v1/status` in `pollStatistics`.
-They record total attempts, successful/failed transport reads, the
+They record total attempts, successful reads, real transport failures
+(`failures`), reads where the device did not respond (`deviceNotResponding`,
+usually an idle or sleeping mouse, counted apart from `failures`), the
 most recent successful scan, the most recent scan that returned
 battery data, and the most recent read duration. No persistent
 telemetry log, third-party network request, serial number, or
@@ -241,3 +307,11 @@ HID path is introduced.
 
 Use the read-only local status endpoint to watch success/failure counts over
 a longer session. The counters reset when the EXE is restarted.
+`attempts = successes + failures + deviceNotResponding` always holds.
+
+A 16.5 hour run (2026-10-23 to 2026-10-24, issue #5) recorded 440 attempts and
+341 successes. The other 99 reads were all `deviceNotResponding` from the idle
+mouse, which the earlier counters reported as `failures`; there were no false
+disconnects and sleep/wake recovered automatically. Razer Synapse was not
+installed, so coexistence is untested. The full validation table is in
+[TRANSPORT.md](TRANSPORT.md).

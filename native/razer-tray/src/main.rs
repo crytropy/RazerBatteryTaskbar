@@ -1,17 +1,21 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;
+#[cfg(windows)]
+mod device_events;
 mod polling;
 #[cfg(windows)]
 mod power_events;
+mod resume_recovery;
 mod settings_menu;
 mod startup;
 
 use std::error::Error;
-use std::thread;
 use std::time::Duration;
 
 use api::SharedIntegrationState;
+#[cfg(windows)]
+use device_events::DeviceChangeNotifications;
 use notify_rust::{Notification, Urgency};
 use polling::{CoreUpdate, CoreWorker};
 #[cfg(windows)]
@@ -25,6 +29,7 @@ use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
 #[cfg(windows)]
 use razer_core::windows_hid::ExperimentalDeathAdderTransport;
+use resume_recovery::{RecoveryOutcome, RecoveryTick, ResumeRecovery};
 use settings_menu::{MIN_POLL_INTERVAL_SECONDS, SettingsMenu};
 use single_instance::SingleInstance;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
@@ -40,7 +45,12 @@ const INSTANCE_NAME: &str = "RazerBatteryTaskbar.Native.Tray";
 enum UserEvent {
     Menu(MenuEvent),
     Core(CoreUpdate),
-    PowerResume,
+    /// Windows resumed; the payload is the recovery generation for this wake.
+    PowerResume(u64),
+    /// A scheduled post-resume recovery refresh is due.
+    RecoveryTick(RecoveryTick),
+    /// A debounced USB/HID device arrival or removal asks for a rescan.
+    DeviceChange,
 }
 
 struct PlaceholderTransport;
@@ -166,6 +176,7 @@ struct TrayApplication {
     settings: AppSettings,
     integration_state: SharedIntegrationState,
     last_snapshot: Option<FrontendSnapshot>,
+    resume_recovery: ResumeRecovery,
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
     settings_menu: Option<SettingsMenu>,
@@ -186,6 +197,7 @@ impl TrayApplication {
             settings,
             integration_state,
             last_snapshot: None,
+            resume_recovery: ResumeRecovery::default(),
             tray: None,
             status_item: None,
             settings_menu: None,
@@ -208,7 +220,7 @@ impl TrayApplication {
 
         let tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_icon(build_battery_icon(None)?)
+            .with_icon(build_battery_icon(None, false)?)
             .with_tooltip("RazerBatteryTaskbar Native")
             .build()?;
 
@@ -253,16 +265,17 @@ impl TrayApplication {
 
         if let Some(tray) = &self.tray {
             let _ = tray.set_tooltip(Some(&status));
-            let battery = if snapshot.transport_healthy && snapshot.transport_ready {
-                snapshot
-                    .primary_device
-                    .as_ref()
-                    .and_then(|device| device.battery)
+            let (battery, charging) = if snapshot.transport_healthy && snapshot.transport_ready {
+                let device = snapshot.primary_device.as_ref();
+                (
+                    device.and_then(|device| device.battery),
+                    device.and_then(|device| device.charging) == Some(true),
+                )
             } else {
-                None
+                (None, false)
             };
             let _ = tray.set_icon(Some(
-                build_battery_icon(battery).expect("generated tray icon must be valid"),
+                build_battery_icon(battery, charging).expect("generated tray icon must be valid"),
             ));
         }
     }
@@ -435,8 +448,19 @@ impl ApplicationHandler<UserEvent> for TrayApplication {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Menu(event) => self.handle_menu(event_loop, event),
-            UserEvent::Core(update) => self.apply_core_update(update),
-            UserEvent::PowerResume => self.refresh(),
+            UserEvent::Core(update) => {
+                if self.resume_recovery.on_update(&update.snapshot) == RecoveryOutcome::Exhausted {
+                    eprintln!("post-resume recovery refreshes failed; regular polling continues");
+                }
+                self.apply_core_update(update);
+            }
+            UserEvent::PowerResume(generation) => self.resume_recovery.on_resume(generation),
+            UserEvent::RecoveryTick(tick) => {
+                if self.resume_recovery.on_tick(tick) {
+                    self.refresh();
+                }
+            }
+            UserEvent::DeviceChange => self.refresh(),
         }
     }
 
@@ -529,28 +553,49 @@ fn format_status(snapshot: &FrontendSnapshot) -> String {
     }
 
     match snapshot.primary_device.as_ref() {
-        Some(device) if device.connected => match device.battery {
-            Some(battery) => format!(
-                "{} — {battery:.1}%",
-                device.name.as_deref().unwrap_or("Razer device")
-            ),
-            None => format!(
-                "{} — Battery unavailable",
-                device.name.as_deref().unwrap_or("Razer device")
-            ),
-        },
+        Some(device) if device.connected => {
+            let name = device.name.as_deref().unwrap_or("Razer device");
+            let charging = if device.charging == Some(true) {
+                " — Charging"
+            } else {
+                ""
+            };
+            match device.battery {
+                Some(battery) => format!("{name} — {battery:.1}%{charging}"),
+                None => format!("{name} — Battery unavailable{charging}"),
+            }
+        }
         _ => "No supported Razer devices detected".to_string(),
     }
 }
 
-fn build_battery_icon(battery: Option<f32>) -> Result<Icon, tray_icon::BadIcon> {
+fn build_battery_icon(battery: Option<f32>, charging: bool) -> Result<Icon, tray_icon::BadIcon> {
     const WIDTH: u32 = 16;
     const HEIGHT: u32 = 16;
 
-    Icon::from_rgba(battery_icon_rgba(battery), WIDTH, HEIGHT)
+    Icon::from_rgba(battery_icon_rgba(battery, charging), WIDTH, HEIGHT)
 }
 
-fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
+/// Lightning bolt drawn inside the battery cell while charging, as
+/// (x, y) pixels. It spans the interior rows 5..=10 and columns 5..=8.
+const CHARGING_BOLT_PIXELS: [(u32, u32); 14] = [
+    (7, 5),
+    (8, 5),
+    (6, 6),
+    (7, 6),
+    (5, 7),
+    (6, 7),
+    (7, 7),
+    (8, 7),
+    (7, 8),
+    (8, 8),
+    (6, 9),
+    (7, 9),
+    (5, 10),
+    (6, 10),
+];
+
+fn battery_icon_rgba(battery: Option<f32>, charging: bool) -> Vec<u8> {
     const WIDTH: u32 = 16;
     const HEIGHT: u32 = 16;
 
@@ -590,6 +635,9 @@ fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
                 }
             }
         }
+        // While charging the bolt replaces the unknown marker; a dimmed bolt
+        // in an empty cell is the charging-with-unknown-battery state.
+        None if charging => {}
         None => {
             // Unknown is not zero: draw a small question mark inside the empty cell.
             for (x, y) in [
@@ -604,6 +652,16 @@ fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
             ] {
                 set_pixel(x, y, 255);
             }
+        }
+    }
+
+    if charging {
+        // Invert the bolt against whatever is underneath so it stays legible
+        // over the white fill as well as over the empty (transparent) cell.
+        let unfilled_value = if battery.is_some() { 255 } else { 200 };
+        for (x, y) in CHARGING_BOLT_PIXELS {
+            let filled = fill_width.is_some_and(|fill_width| x < 3 + fill_width);
+            set_pixel(x, y, if filled { 0 } else { unfilled_value });
         }
     }
 
@@ -656,25 +714,41 @@ fn main() -> Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
 
     // Windows sends an automatic resume event, often followed by a second
-    // user-resume event. The power callback deduplicates the pair.
-    // Retry once after the receiver's USB/HID interface has had time to recover.
+    // user-resume event. The power callback deduplicates the pair. The
+    // receiver needs several seconds to re-pair with the mouse, so recovery
+    // refreshes are staggered (see `resume_recovery`) and stop at the first
+    // real battery read.
     #[cfg(windows)]
     let _power_notifications = {
         let resume_proxy = event_loop.create_proxy();
         match PowerNotifications::register(move || {
-            let _ = resume_proxy.send_event(UserEvent::PowerResume);
+            let generation = resume_recovery::next_generation();
+            let _ = resume_proxy.send_event(UserEvent::PowerResume(generation));
 
-            let retry_proxy = resume_proxy.clone();
-            let _ = thread::Builder::new()
-                .name("razer-resume-retry".to_string())
-                .spawn(move || {
-                    thread::sleep(Duration::from_secs(3));
-                    let _ = retry_proxy.send_event(UserEvent::PowerResume);
-                });
+            let tick_proxy = resume_proxy.clone();
+            resume_recovery::spawn_ticks(generation, move |tick| {
+                let _ = tick_proxy.send_event(UserEvent::RecoveryTick(tick));
+            });
         }) {
             Ok(registration) => Some(registration),
             Err(error) => {
                 eprintln!("Windows resume notification unavailable: {error}");
+                None
+            }
+        }
+    };
+
+    // Unplugging or replugging the receiver produces a burst of HID interface
+    // notifications. The device-change module debounces them into rescans.
+    #[cfg(windows)]
+    let _device_notifications = {
+        let rescan_proxy = event_loop.create_proxy();
+        match DeviceChangeNotifications::register(move || {
+            let _ = rescan_proxy.send_event(UserEvent::DeviceChange);
+        }) {
+            Ok(registration) => Some(registration),
+            Err(error) => {
+                eprintln!("Windows device-change notification unavailable: {error}");
                 None
             }
         }
@@ -704,6 +778,80 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use razer_core::frontend::FrontendDeviceState;
+    use razer_core::state::DeviceType;
+
+    fn healthy_snapshot(battery: Option<f32>, charging: Option<bool>) -> FrontendSnapshot {
+        let device = FrontendDeviceState {
+            vendor_id: 0x1532,
+            product_id: 0x00B7,
+            name: Some("Razer Deathadder V3 Pro Wireless".to_string()),
+            device_type: DeviceType::Mouse,
+            battery,
+            charging,
+            connected: true,
+        };
+        FrontendSnapshot {
+            devices: vec![device.clone()],
+            primary_device: Some(device),
+            transport_name: "windows-hid".to_string(),
+            transport_ready: true,
+            transport_healthy: true,
+            consecutive_transport_failures: 0,
+            transport_error_kind: None,
+            poll_statistics: PollStatistics::default(),
+        }
+    }
+
+    #[test]
+    fn status_text_appends_charging_in_the_existing_format() {
+        assert_eq!(
+            format_status(&healthy_snapshot(Some(64.0), Some(true))),
+            "Razer Deathadder V3 Pro Wireless — 64.0% — Charging"
+        );
+        assert_eq!(
+            format_status(&healthy_snapshot(None, Some(true))),
+            "Razer Deathadder V3 Pro Wireless — Battery unavailable — Charging"
+        );
+        assert_eq!(
+            format_status(&healthy_snapshot(Some(64.0), Some(false))),
+            "Razer Deathadder V3 Pro Wireless — 64.0%"
+        );
+        assert_eq!(
+            format_status(&healthy_snapshot(Some(64.0), None)),
+            "Razer Deathadder V3 Pro Wireless — 64.0%"
+        );
+    }
+
+    #[test]
+    fn charging_icon_differs_from_non_charging_icon_at_every_battery_level() {
+        for level in [0.0, 37.0, 50.0, 100.0] {
+            assert!(build_battery_icon(Some(level), true).is_ok());
+            assert_ne!(
+                battery_icon_rgba(Some(level), true),
+                battery_icon_rgba(Some(level), false),
+                "charging mark missing at {level}%"
+            );
+        }
+        // Not charging and unknown charging render the same icon as before.
+        assert_eq!(
+            battery_icon_rgba(Some(50.0), false).len(),
+            (16 * 16 * 4) as usize
+        );
+    }
+
+    #[test]
+    fn charging_icon_renders_with_unknown_battery() {
+        assert!(build_battery_icon(None, true).is_ok());
+        assert_ne!(
+            battery_icon_rgba(None, true),
+            battery_icon_rgba(None, false)
+        );
+        assert_ne!(
+            battery_icon_rgba(None, true),
+            battery_icon_rgba(Some(0.0), true)
+        );
+    }
 
     #[test]
     fn placeholder_status_is_explicit_that_no_battery_transport_is_active() {
@@ -810,19 +958,28 @@ mod tests {
 
     #[test]
     fn generated_icons_are_valid_at_extreme_battery_levels() {
-        assert!(build_battery_icon(Some(0.0)).is_ok());
-        assert!(build_battery_icon(Some(100.0)).is_ok());
-        assert!(build_battery_icon(None).is_ok());
+        assert!(build_battery_icon(Some(0.0), false).is_ok());
+        assert!(build_battery_icon(Some(100.0), false).is_ok());
+        assert!(build_battery_icon(None, false).is_ok());
     }
 
     #[test]
     fn unknown_battery_icon_is_distinct_from_empty_battery() {
-        assert_ne!(battery_icon_rgba(None), battery_icon_rgba(Some(0.0)));
-        assert_ne!(battery_icon_rgba(None), battery_icon_rgba(Some(100.0)));
-        assert_eq!(battery_icon_rgba(Some(0.0)), battery_icon_rgba(Some(-10.0)));
+        assert_ne!(
+            battery_icon_rgba(None, false),
+            battery_icon_rgba(Some(0.0), false)
+        );
+        assert_ne!(
+            battery_icon_rgba(None, false),
+            battery_icon_rgba(Some(100.0), false)
+        );
         assert_eq!(
-            battery_icon_rgba(Some(100.0)),
-            battery_icon_rgba(Some(110.0))
+            battery_icon_rgba(Some(0.0), false),
+            battery_icon_rgba(Some(-10.0), false)
+        );
+        assert_eq!(
+            battery_icon_rgba(Some(100.0), false),
+            battery_icon_rgba(Some(110.0), false)
         );
     }
 }

@@ -259,4 +259,62 @@ mod tests {
         }));
         drop(worker);
     }
+
+    /// A receiver unplug fires several HID interface notifications; the
+    /// debouncer must turn the burst into a single worker read.
+    #[cfg(windows)]
+    #[test]
+    fn usb_device_change_burst_coalesces_into_one_rescan() {
+        use crate::device_events::{DeviceChangeDebouncer, TimerOutcome};
+        use std::time::Instant;
+
+        let (sender, receiver) = mpsc::channel();
+        let reads = Arc::new(AtomicUsize::new(0));
+
+        let worker = CoreWorker::start(
+            TestTransport {
+                reads: Arc::clone(&reads),
+            },
+            Duration::from_secs(60),
+            NotificationSettings::default(),
+            PrimaryDevicePreference::Auto,
+            move |_| sender.send(()).is_ok(),
+        );
+        receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        let mut debouncer = DeviceChangeDebouncer::default();
+        let now = Instant::now();
+        let mut armed = 0;
+        for offset_ms in [0, 10, 20, 150, 300, 600] {
+            if debouncer
+                .on_event(now + Duration::from_millis(offset_ms))
+                .is_some()
+            {
+                armed += 1;
+            }
+        }
+        assert_eq!(armed, 1, "a burst arms exactly one timer");
+
+        let TimerOutcome::Rescan { wait_until } = debouncer.on_timer(now + Duration::from_secs(10))
+        else {
+            panic!("the burst deadline has passed");
+        };
+        assert!(worker.request_refresh());
+        receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(reads.load(Ordering::SeqCst), 2, "six events cost one read");
+
+        // The settle rescan is the only other read the burst produces.
+        let follow_up = wait_until.expect("a follow-up rescan is scheduled");
+        assert_eq!(
+            debouncer.on_timer(follow_up),
+            TimerOutcome::Rescan { wait_until: None }
+        );
+        assert!(worker.request_refresh());
+        receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        thread::sleep(Duration::from_millis(50));
+        assert_eq!(reads.load(Ordering::SeqCst), 3);
+        drop(worker);
+    }
 }
