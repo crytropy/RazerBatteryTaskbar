@@ -21,7 +21,7 @@ use notify_rust::{Notification, Urgency};
 use polling::{CoreUpdate, CoreWorker};
 #[cfg(windows)]
 use power_events::PowerNotifications;
-use primary_device_menu::PrimaryDeviceMenu;
+use primary_device_menu::{PrimaryDeviceMenu, canonical_preference};
 use razer_core::frontend::FrontendSnapshot;
 #[cfg(test)]
 use razer_core::frontend::PollStatistics;
@@ -130,14 +130,16 @@ enum LaunchOptions {
     Help,
 }
 
-/// Retired opt-in flag from the preview builds; accepted as a no-op.
-const LEGACY_HID_FLAG: &str = "--experimental-hid-00b7";
+use startup::LEGACY_HID_FLAG;
 const PLACEHOLDER_FLAG: &str = "--placeholder-transport";
 
 fn parse_launch_options(args: &[String]) -> Result<LaunchOptions, String> {
     match args {
         [] => Ok(LaunchOptions::Run(TransportChoice::WindowsHid)),
         [option] if option == LEGACY_HID_FLAG => {
+            // Release builds use windows_subsystem = "windows", so this notice
+            // has no console to land in; it is visible only in debug runs and
+            // when stderr is redirected. The flag is accepted either way.
             eprintln!(
                 "{LEGACY_HID_FLAG} is a no-op: the Windows HID transport is already the default."
             );
@@ -152,11 +154,24 @@ fn parse_launch_options(args: &[String]) -> Result<LaunchOptions, String> {
 }
 
 fn print_help() {
-    println!("RazerBatteryTaskbar Native Preview");
+    println!("RazerBatteryTaskbar Native");
     println!("Usage: razer-tray.exe [{PLACEHOLDER_FLAG}]");
     println!("Starts with the native Windows HID battery transport by default.");
     println!("  {PLACEHOLDER_FLAG}   debug only: run without any battery transport");
     println!("  {LEGACY_HID_FLAG}  retired; accepted as a no-op");
+}
+
+/// Resolve a saved primary-device preference to the canonical product ID the
+/// core reports (the wired twin `00B6` becomes `00B7`). Returns `true` when
+/// the settings were changed.
+fn canonicalize_primary_device(settings: &mut AppSettings) -> bool {
+    let canonical = canonical_preference(&settings.primary_device);
+    if canonical == settings.primary_device {
+        return false;
+    }
+
+    settings.primary_device = canonical;
+    true
 }
 
 /// Raise a saved poll interval to the Windows HID transport's minimum.
@@ -526,16 +541,23 @@ fn load_settings() -> (Option<SettingsStore>, AppSettings) {
 
 fn reconcile_startup_setting(store: Option<&SettingsStore>, settings: &mut AppSettings) {
     match startup::is_enabled() {
-        Ok(enabled) if enabled != settings.start_with_windows => {
-            settings.start_with_windows = enabled;
+        Ok(enabled) => {
+            if enabled != settings.start_with_windows {
+                settings.start_with_windows = enabled;
 
-            if let Some(store) = store
-                && let Err(error) = store.save(settings)
-            {
-                eprintln!("failed to reconcile start-with-Windows setting: {error}");
+                if let Some(store) = store
+                    && let Err(error) = store.save(settings)
+                {
+                    eprintln!("failed to reconcile start-with-Windows setting: {error}");
+                }
+            }
+
+            // A Run entry left by a preview still carries the retired flag;
+            // rewrite it to the plain path now rather than on a later toggle.
+            if enabled && let Err(error) = startup::migrate_legacy_entry() {
+                eprintln!("failed to rewrite the legacy start-with-Windows entry: {error}");
             }
         }
-        Ok(_) => {}
         Err(error) => {
             eprintln!("failed to read start-with-Windows registration: {error}");
         }
@@ -720,11 +742,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (settings_store, mut settings) = load_settings();
     reconcile_startup_setting(settings_store.as_ref(), &mut settings);
 
-    if clamp_poll_interval(&mut settings)
+    let clamped = clamp_poll_interval(&mut settings);
+    let canonicalized = canonicalize_primary_device(&mut settings);
+    if (clamped || canonicalized)
         && let Some(store) = settings_store.as_ref()
         && let Err(error) = store.save(&settings)
     {
-        eprintln!("failed to persist clamped poll interval: {error}");
+        eprintln!("failed to persist normalized settings: {error}");
     }
 
     let transport = transport_choice.into_transport()?;
@@ -987,6 +1011,23 @@ mod tests {
         };
         assert!(!clamp_poll_interval(&mut settings));
         assert_eq!(settings.poll_interval_seconds, 300);
+    }
+
+    #[test]
+    fn saved_wired_twin_preference_is_rewritten_to_the_canonical_product_id() {
+        let mut settings = AppSettings {
+            primary_device: PrimaryDevicePreference::ProductId(0x00B6),
+            ..AppSettings::default()
+        };
+        assert!(canonicalize_primary_device(&mut settings));
+        assert_eq!(
+            settings.primary_device,
+            PrimaryDevicePreference::ProductId(0x00B7)
+        );
+
+        assert!(!canonicalize_primary_device(&mut settings));
+        let mut automatic = AppSettings::default();
+        assert!(!canonicalize_primary_device(&mut automatic));
     }
 
     #[test]

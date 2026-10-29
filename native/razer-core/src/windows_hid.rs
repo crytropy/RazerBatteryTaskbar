@@ -6,8 +6,9 @@ use hidapi::{HidApi, HidDevice};
 use crate::RAZER_VENDOR_ID;
 use crate::device_db::{LogicalDevice, get_product, logical_device};
 use crate::protocol::{
-    CHARGING_STATUS_COMMAND, CRC_OFFSET, REPORT_SIZE, build_battery_request,
-    build_charging_request, calculate_crc, parse_battery_level, parse_charging_status,
+    BATTERY_LEVEL_COMMAND, CHARGING_STATUS_COMMAND, CRC_OFFSET, POWER_COMMAND_CLASS, REPORT_SIZE,
+    build_battery_request, build_charging_request, calculate_crc, parse_battery_level,
+    parse_charging_status,
 };
 use crate::state::DeviceReading;
 use crate::transport::{BatteryTransport, TransportError, TransportErrorKind};
@@ -25,8 +26,6 @@ const STATUS_BUSY: u8 = 0x01;
 const STATUS_FAILURE: u8 = 0x03;
 const STATUS_TIMEOUT: u8 = 0x04;
 const STATUS_NOT_SUPPORTED: u8 = 0x05;
-const COMMAND_CLASS: u8 = 0x07;
-const COMMAND_ID: u8 = 0x80;
 const RESPONSE_DELAY: Duration = Duration::from_millis(500);
 
 /// Native Windows HID feature-report transport (ADR-0001), reported as
@@ -63,7 +62,7 @@ impl WindowsHidTransport {
     /// The canonical product ID and base model name keep the device id and
     /// the user-visible name identical across cable plug / unplug, so the
     /// manager never sees a second device or a disconnect.
-    fn reading(&self, battery: f32, charging: Option<bool>) -> DeviceReading {
+    fn build_reading(&self, battery: f32, charging: Option<bool>) -> DeviceReading {
         DeviceReading {
             vendor_id: RAZER_VENDOR_ID,
             product_id: self.device.product_id,
@@ -150,7 +149,7 @@ fn validate_feature_reply(
         ));
     }
 
-    if report[6] != COMMAND_CLASS || report[7] != command {
+    if report[6] != POWER_COMMAND_CLASS || report[7] != command {
         return Err(TransportError::with_kind(
             TransportErrorKind::InvalidResponse,
             "Razer response command mismatch",
@@ -169,7 +168,7 @@ fn validate_feature_reply(
 
 /// Parse a validated battery level reply into a percentage.
 pub fn parse_feature_reply(bytes: &[u8], transaction_id: u8) -> Result<f32, TransportError> {
-    let report = validate_feature_reply(bytes, transaction_id, COMMAND_ID)?;
+    let report = validate_feature_reply(bytes, transaction_id, BATTERY_LEVEL_COMMAND)?;
 
     parse_battery_level(&report).map_err(|_| {
         TransportError::with_kind(
@@ -189,11 +188,12 @@ pub fn parse_charging_reply(bytes: &[u8], transaction_id: u8) -> Result<bool, Tr
 }
 
 /// Send one 90-byte request as a feature report, wait for the device, and
-/// read back the reply (report id included). `what` names the query in errors.
+/// read back the reply (report id included). `query_name` labels the query
+/// ("battery", "charging status") in error messages.
 fn query_feature(
     device: &HidDevice,
     request: &[u8; REPORT_SIZE],
-    what: &str,
+    query_name: &str,
 ) -> Result<Vec<u8>, TransportError> {
     let mut feature_request = [0u8; REPORT_SIZE + 1];
     feature_request[1..].copy_from_slice(request);
@@ -201,7 +201,7 @@ fn query_feature(
     device.send_feature_report(&feature_request).map_err(|_| {
         TransportError::with_kind(
             TransportErrorKind::Send,
-            format!("Razer {what} query could not be sent"),
+            format!("Razer {query_name} query could not be sent"),
         )
     })?;
     thread::sleep(RESPONSE_DELAY);
@@ -210,7 +210,7 @@ fn query_feature(
     let received = device.get_feature_report(&mut reply).map_err(|_| {
         TransportError::with_kind(
             TransportErrorKind::Receive,
-            format!("Razer {what} response could not be read"),
+            format!("Razer {query_name} response could not be read"),
         )
     })?;
 
@@ -272,12 +272,10 @@ impl BatteryTransport for WindowsHidTransport {
             .find(|device| device.product_id() == product_id)
             .expect("selected product ID comes from the enumerated candidates");
 
-        let product = get_product(product_id).ok_or_else(|| {
-            TransportError::with_kind(
-                TransportErrorKind::Configuration,
-                format!("{product_id:04X} missing from Razer device database"),
-            )
-        })?;
+        // Every product ID of the logical device comes from the database
+        // pairing, so the lookup cannot fail for a selected candidate.
+        let product = get_product(product_id)
+            .expect("selected product ID comes from the embedded Razer device database");
 
         let device = candidate.open_device(&api).map_err(|_| {
             TransportError::with_kind(
@@ -303,7 +301,7 @@ impl BatteryTransport for WindowsHidTransport {
         .and_then(|reply| parse_charging_reply(&reply, transaction_id))
         .ok();
 
-        Ok(vec![self.reading(battery, charging)])
+        Ok(vec![self.build_reading(battery, charging)])
     }
 }
 
@@ -317,7 +315,7 @@ mod tests {
         report[0] = SUCCESS_STATUS;
         report[1] = transaction_id;
         report[5] = 0x02;
-        report[6] = COMMAND_CLASS;
+        report[6] = POWER_COMMAND_CLASS;
         report[7] = command;
         report[9] = payload;
         report[CRC_OFFSET] = calculate_crc(&report);
@@ -328,7 +326,7 @@ mod tests {
     }
 
     fn reply(transaction_id: u8, battery: u8) -> [u8; REPORT_SIZE + 1] {
-        command_reply(transaction_id, COMMAND_ID, battery)
+        command_reply(transaction_id, BATTERY_LEVEL_COMMAND, battery)
     }
 
     #[test]
@@ -460,7 +458,7 @@ mod tests {
     fn reading_describes_the_logical_device_not_the_answering_twin() {
         let transport = WindowsHidTransport::new();
 
-        let reading = transport.reading(80.0, Some(true));
+        let reading = transport.build_reading(80.0, Some(true));
 
         assert_eq!(reading.vendor_id, RAZER_VENDOR_ID);
         // Canonical identity is the receiver PID, whether the mouse answered

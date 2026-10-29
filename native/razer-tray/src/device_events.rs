@@ -7,7 +7,7 @@
 //! into rescan requests for the background worker.
 use std::ffi::c_void;
 use std::io;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use std::{ptr, slice, thread};
 
@@ -71,6 +71,13 @@ impl DeviceChangeDebouncer {
         arm_timer.then_some(deadline)
     }
 
+    /// The timer `on_event` asked for could not be started: go back to idle so
+    /// the next event arms a new one instead of waiting for a timer that will
+    /// never fire.
+    pub fn timer_unavailable(&mut self) {
+        self.phase = Phase::Idle;
+    }
+
     pub fn on_timer(&mut self, now: Instant) -> TimerOutcome {
         match self.phase {
             Phase::Idle => TimerOutcome::Rescan { wait_until: None },
@@ -92,26 +99,61 @@ impl DeviceChangeDebouncer {
     }
 }
 
+/// Starts the timer body on its own thread. Injected so the spawn-failure
+/// path can be exercised without exhausting the process's threads.
+type TimerSpawner = Box<dyn Fn(Box<dyn FnOnce() + Send>) -> io::Result<()> + Send + Sync>;
+
+fn spawn_timer_thread(timer: Box<dyn FnOnce() + Send>) -> io::Result<()> {
+    thread::Builder::new()
+        .name("razer-device-change".to_string())
+        .spawn(timer)
+        .map(drop)
+}
+
 struct CallbackState {
     callback: Box<dyn Fn() + Send + Sync>,
     debouncer: Mutex<DeviceChangeDebouncer>,
+    spawn_timer: TimerSpawner,
 }
 
 impl CallbackState {
+    fn new(callback: impl Fn() + Send + Sync + 'static) -> Self {
+        Self::with_spawner(callback, Box::new(spawn_timer_thread))
+    }
+
+    fn with_spawner(
+        callback: impl Fn() + Send + Sync + 'static,
+        spawn_timer: TimerSpawner,
+    ) -> Self {
+        Self {
+            callback: Box::new(callback),
+            debouncer: Mutex::new(DeviceChangeDebouncer::default()),
+            spawn_timer,
+        }
+    }
+
+    /// The debouncer holds plain state and nothing panics while it is locked,
+    /// so a poisoned lock is recovered rather than silencing device changes.
+    fn debouncer(&self) -> MutexGuard<'_, DeviceChangeDebouncer> {
+        self.debouncer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Feeds one relevant interface event into the debouncer and starts the
     /// timer thread when none is running. Never blocks for long and never
     /// touches HID: the callback runs on a Windows thread-pool thread.
     fn on_event(self: &Arc<Self>) {
-        let armed = match self.debouncer.lock() {
-            Ok(mut debouncer) => debouncer.on_event(Instant::now()),
-            Err(_) => None,
+        let Some(deadline) = self.debouncer().on_event(Instant::now()) else {
+            return;
         };
 
-        if let Some(deadline) = armed {
-            let state = Arc::clone(self);
-            let _ = thread::Builder::new()
-                .name("razer-device-change".to_string())
-                .spawn(move || state.run_timer(deadline));
+        let state = Arc::clone(self);
+        if let Err(error) = (self.spawn_timer)(Box::new(move || state.run_timer(deadline))) {
+            // Without a timer the burst would stay armed forever and every
+            // later event would be swallowed; fall back to idle instead.
+            eprintln!("device-change timer thread unavailable: {error}");
+            self.debouncer().timer_unavailable();
         }
     }
 
@@ -121,10 +163,7 @@ impl CallbackState {
                 thread::sleep(remaining);
             }
 
-            let outcome = match self.debouncer.lock() {
-                Ok(mut debouncer) => debouncer.on_timer(Instant::now()),
-                Err(_) => return,
-            };
+            let outcome = self.debouncer().on_timer(Instant::now());
 
             match outcome {
                 TimerOutcome::Wait(next) => deadline = next,
@@ -198,10 +237,7 @@ impl DeviceChangeNotifications {
     /// `callback` is invoked once per debounced rescan request, on the timer
     /// thread; it should only enqueue work for the worker or event loop.
     pub fn register(callback: impl Fn() + Send + Sync + 'static) -> io::Result<Self> {
-        let context = Arc::into_raw(Arc::new(CallbackState {
-            callback: Box::new(callback),
-            debouncer: Mutex::new(DeviceChangeDebouncer::default()),
-        }));
+        let context = Arc::into_raw(Arc::new(CallbackState::new(callback)));
 
         let mut filter = CM_NOTIFY_FILTER {
             cbSize: size_of::<CM_NOTIFY_FILTER>() as u32,
@@ -343,6 +379,50 @@ mod tests {
         ));
         // An unreadable link must not silence a real device change.
         assert!(is_razer_interface(""));
+    }
+
+    /// A spawner that records every timer it is asked to start and never runs
+    /// it, so the test controls when (if ever) the debouncer would fire.
+    fn recording_spawner(fail: bool) -> (TimerSpawner, Arc<Mutex<usize>>) {
+        let spawns = Arc::new(Mutex::new(0usize));
+        let counter = Arc::clone(&spawns);
+        let spawner: TimerSpawner = Box::new(move |_timer| {
+            *counter.lock().unwrap() += 1;
+            if fail {
+                Err(io::Error::other("no threads left"))
+            } else {
+                Ok(())
+            }
+        });
+        (spawner, spawns)
+    }
+
+    #[test]
+    fn a_failed_timer_spawn_leaves_the_debouncer_ready_for_the_next_event() {
+        let (spawner, spawns) = recording_spawner(true);
+        let state = Arc::new(CallbackState::with_spawner(|| {}, spawner));
+
+        // The thread could not be started: the burst must not be left armed,
+        // otherwise no later device change would ever reach the worker.
+        state.on_event();
+        assert_eq!(*spawns.lock().unwrap(), 1);
+        state.on_event();
+        assert_eq!(
+            *spawns.lock().unwrap(),
+            2,
+            "the next event must try to start a timer again"
+        );
+    }
+
+    #[test]
+    fn a_burst_starts_exactly_one_timer_thread() {
+        let (spawner, spawns) = recording_spawner(false);
+        let state = Arc::new(CallbackState::with_spawner(|| {}, spawner));
+
+        state.on_event();
+        state.on_event();
+        state.on_event();
+        assert_eq!(*spawns.lock().unwrap(), 1);
     }
 
     #[test]

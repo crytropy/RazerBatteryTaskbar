@@ -30,11 +30,11 @@ It does not parse Razer packets, enumerate HID collections, or know device seria
 
 ### Primary device
 
-The right-click menu has a `Primary device` submenu directly under the status line. It lists `Automatic` plus one entry per currently connected Razer device, named from the device database; the active choice is checked. With one device attached the submenu still shows that single device. The entries are rebuilt from every core snapshot, so a device that is plugged in appears on the next poll or device-change rescan and an unplugged device disappears.
+The right-click menu has a `Primary device` submenu directly under the status line. It lists `Automatic` plus one entry per currently connected Razer device, named as in the core snapshot; the active choice is checked. Under `Automatic` the device the icon currently shows carries a `(current)` marker, so the automatic pick is always visible. With one device attached the submenu still shows that single device. The entries are rebuilt from every core snapshot, so a device that is plugged in appears on the next poll or device-change rescan and an unplugged device disappears.
 
 Picking a device sends the preference to the running worker, which answers with a snapshot built from the devices it already knows; the icon, tooltip and `/v1/status` switch at once and no extra HID handle is opened. The choice is stored as `primaryDevice` in `settings.json` (see [SETTINGS.md](SETTINGS.md)) and applied again at the next start.
 
-The preference is keyed on the Razer product ID. When the preferred device is unplugged the core falls back to its default ordering (Mouse → Headset → Dock → Dongle → Unknown); the submenu keeps the preferred device visible as a disabled, checked `… (disconnected)` entry so the fallback is explicit, and the preference takes over again as soon as the device reconnects. `Automatic` returns to the default ordering.
+The preference is keyed on the Razer product ID. When the preferred device is unplugged the core falls back to its default ordering (Mouse → Headset → Dock → Dongle → Unknown); the submenu keeps the preferred device visible as a disabled, checked `… (disconnected)` entry and marks the fallback device `(current)`, so the fallback is explicit, and the preference takes over again as soon as the device reconnects. `Automatic` returns to the default ordering. A preference saved for the wired product ID of a paired mouse (`00B6` for the DeathAdder V3 Pro on its cable) is resolved to the logical device (`00B7`) at startup and saved back, so it matches the entry the core reports.
 
 ### Settings
 
@@ -49,7 +49,7 @@ The Settings submenu contains:
 
 Changing the polling interval updates the active core worker immediately. It does not start another USB/HID thread and does not require an application restart.
 
-The polling interval menu offers 1 minute and 5 minutes. The 60-second minimum is a property of the Windows HID transport (one handle open/close and a 500 ms reply wait per query, ADR-0001), so shorter values are not offered; a `settings.json` saved by an earlier build with a shorter interval is raised to 60 seconds at startup and saved back.
+The polling interval menu offers 1 minute and 5 minutes. The 60-second minimum is a property of the Windows HID transport (one handle open/close per poll and a 500 ms reply wait for each of its two queries, ADR-0001), so shorter values are not offered; a `settings.json` saved by an earlier build with a shorter interval is raised to 60 seconds at startup and saved back.
 
 Threshold changes are validated before persistence. Critical-battery choices above the selected low-battery threshold are disabled.
 
@@ -251,7 +251,10 @@ early only returned `deviceNotResponding`. Recovery refreshes are therefore
 staggered at **+3 s, +10 s and +20 s** after the resume event. The first
 refresh that produces a real battery read (a successful transport read with
 the primary device connected and reporting a battery level) cancels the
-remaining attempts. If all three fail, the tray gives up on recovery and the
+remaining attempts. Only snapshots backed by a transport read made after the
+resume count: a snapshot republished without a read, such as the one that
+follows a `Primary device` switch, neither ends nor exhausts the recovery.
+If all three fail, the tray gives up on recovery and the
 ordinary scheduled polling takes over unchanged; the device stays
 `connected` and the last known battery level is retained, exactly as for
 any other `deviceNotResponding` failure. A second wake that arrives after
@@ -334,9 +337,10 @@ the HID transport is the default, no launch flag is ever written.
 
 Run entries created by earlier previews may still end in
 `--experimental-hid-00b7`. Such an entry is recognised as "enabled" on
-startup (so the toggle shows the real registration state) and is replaced
-with the plain executable path the next time the toggle is switched on.
-Until then the flag is harmless: the process accepts it as a no-op.
+startup (so the toggle shows the real registration state) and is rewritten
+to the plain executable path at that same startup, so the next toggle or
+Windows login already uses the flag-free command. Should the rewrite fail,
+the flag is harmless: the process accepts it as a no-op.
 
 A copied/moved executable may require the startup toggle to be re-enabled
 to update the registered path. The executable should be kept in its

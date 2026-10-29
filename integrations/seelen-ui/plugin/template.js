@@ -26,7 +26,16 @@ if (!api) {
   return "Razer --";
 }
 
-if (api.schemaVersion !== 1) {
+// Schema 2 only changed what `pollStatistics.failures` counts; every field
+// read here has the same meaning in both versions.
+let supportedSchema = false;
+if (api.schemaVersion === 1) {
+  supportedSchema = true;
+}
+if (api.schemaVersion === 2) {
+  supportedSchema = true;
+}
+if (!supportedSchema) {
   return "Razer --";
 }
 

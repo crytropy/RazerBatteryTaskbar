@@ -150,7 +150,7 @@ mod tests {
         let state = initial_state("windows-hid", true);
         let json = state.read().unwrap();
 
-        assert!(json.contains(r#""schemaVersion":1"#));
+        assert!(json.contains(r#""schemaVersion":2"#));
         assert!(json.contains(r#""transportName":"windows-hid""#));
         assert!(json.contains(r#""transportReady":true"#));
         assert!(json.contains(r#""devices":[]"#));
