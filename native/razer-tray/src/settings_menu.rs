@@ -3,12 +3,19 @@ use std::error::Error;
 use razer_core::settings::AppSettings;
 use tray_icon::menu::{CheckMenuItem, MenuEvent, MenuItem, Submenu};
 
-/// Shortest polling interval the tray offers. The Windows HID transport opens
-/// its handle per query and waits 500 ms for the reply, so ADR-0001 fixes its
-/// minimum at 60 s; the menu never exposes anything shorter.
-pub const MIN_POLL_INTERVAL_SECONDS: u64 = 60;
+/// Shortest polling interval the tray offers. One poll opens the HID handle
+/// once and spends about 1.2 s on its two queries, so 10 s keeps the handle
+/// busy barely 12 % of the time (ADR-0001). Charging-state changes have no
+/// USB event to trigger a rescan (issue #22), so the poll interval is the only
+/// thing that bounds how quickly the icon follows them. The default stays 60 s.
+pub const MIN_POLL_INTERVAL_SECONDS: u64 = 10;
 
-const POLL_INTERVAL_OPTIONS: &[(u64, &str)] = &[(60, "1 minute"), (300, "5 minutes")];
+const POLL_INTERVAL_OPTIONS: &[(u64, &str)] = &[
+    (10, "10 seconds"),
+    (30, "30 seconds"),
+    (60, "1 minute"),
+    (300, "5 minutes"),
+];
 
 const LOW_BATTERY_OPTIONS: &[(u8, &str)] = &[
     (10, "10%"),
@@ -203,7 +210,7 @@ mod tests {
         for (seconds, _) in POLL_INTERVAL_OPTIONS {
             assert!(
                 *seconds >= MIN_POLL_INTERVAL_SECONDS,
-                "{seconds} s is below the 60 s minimum of the Windows HID transport"
+                "{seconds} s is below the {MIN_POLL_INTERVAL_SECONDS} s minimum of the Windows HID transport"
             );
         }
         assert!(
@@ -212,6 +219,17 @@ mod tests {
                 .any(|(seconds, _)| *seconds == MIN_POLL_INTERVAL_SECONDS),
             "the minimum itself must be selectable"
         );
+    }
+
+    #[test]
+    fn polling_menu_offers_ten_and_thirty_seconds_and_keeps_the_sixty_second_default() {
+        assert_eq!(MIN_POLL_INTERVAL_SECONDS, 10);
+        let offered: Vec<u64> = POLL_INTERVAL_OPTIONS.iter().map(|(s, _)| *s).collect();
+        assert_eq!(offered, vec![10, 30, 60, 300]);
+        // The default interval is unchanged: lowering the minimum must not make
+        // every existing user poll six times as often.
+        assert_eq!(AppSettings::default().poll_interval_seconds, 60);
+        assert!(offered.contains(&AppSettings::default().poll_interval_seconds));
     }
 
     #[test]

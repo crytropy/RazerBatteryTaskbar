@@ -49,7 +49,7 @@ The Settings submenu contains:
 
 Changing the polling interval updates the active core worker immediately. It does not start another USB/HID thread and does not require an application restart.
 
-The polling interval menu offers 1 minute and 5 minutes. The 60-second minimum is a property of the Windows HID transport (one handle open/close per poll and a 500 ms reply wait for each of its two queries, ADR-0001), so shorter values are not offered; a `settings.json` saved by an earlier build with a shorter interval is raised to 60 seconds at startup and saved back.
+The polling interval menu offers 10 seconds, 30 seconds, 1 minute (default) and 5 minutes. The 10-second minimum is a property of the Windows HID transport: one poll opens the handle once and spends about 1.2 s on its two queries (ADR-0001), so 10 s is the shortest interval that keeps the handle mostly idle. Choose 10 or 30 seconds when you want the charging state and colour to follow the cable within a few seconds: plugging or unplugging the charging cable while the receiver is connected produces no USB device event, so only the next poll can notice it. A `settings.json` with a shorter interval is raised to 10 seconds at startup and saved back.
 
 Threshold changes are validated before persistence. Critical-battery choices above the selected low-battery threshold are disabled.
 
@@ -234,7 +234,7 @@ Start it from PowerShell with no arguments:
 ```
 
 The transport sends a battery query on launch and then at intervals of
-**at least 60 seconds**. It opens a handle once per poll, sends the battery
+**at least 10 seconds** (60 seconds by default). It opens a handle once per poll, sends the battery
 query followed by the charging-status query on that handle, then releases
 it, and does not change the Windows driver or mouse settings. With no
 matching receiver attached, reads succeed with an empty device list and the
@@ -281,7 +281,7 @@ The power callback and the timer thread never open an HID handle and never
 block the UI event loop; they only post events to it, and the refreshes run
 on the background battery worker like every other read. If power
 notification registration fails, normal scheduled polling remains available
-as a fallback. The configured polling interval (60 s minimum) remains
+as a fallback. The configured polling interval (10 s minimum, 60 s default) remains
 unchanged for ordinary polling; recovery refreshes are only sent after an
 actual Windows resume event.
 

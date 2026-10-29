@@ -1035,14 +1035,21 @@ mod tests {
             ..AppSettings::default()
         };
         assert!(clamp_poll_interval(&mut settings));
-        assert_eq!(settings.poll_interval_seconds, 60);
+        assert_eq!(settings.poll_interval_seconds, 10);
 
-        let mut settings = AppSettings {
-            poll_interval_seconds: 300,
-            ..AppSettings::default()
-        };
-        assert!(!clamp_poll_interval(&mut settings));
-        assert_eq!(settings.poll_interval_seconds, 300);
+        // Values at or above the minimum are left alone, including the 60 s
+        // default saved by earlier builds and the new 30 s option.
+        for seconds in [10, 30, 60, 300] {
+            let mut settings = AppSettings {
+                poll_interval_seconds: seconds,
+                ..AppSettings::default()
+            };
+            assert!(
+                !clamp_poll_interval(&mut settings),
+                "{seconds} s was clamped"
+            );
+            assert_eq!(settings.poll_interval_seconds, seconds);
+        }
     }
 
     #[test]
