@@ -251,7 +251,10 @@ early only returned `deviceNotResponding`. Recovery refreshes are therefore
 staggered at **+3 s, +10 s and +20 s** after the resume event. The first
 refresh that produces a real battery read (a successful transport read with
 the primary device connected and reporting a battery level) cancels the
-remaining attempts. If all three fail, the tray gives up on recovery and the
+remaining attempts. Only snapshots backed by a transport read made after the
+resume count: a snapshot republished without a read, such as the one that
+follows a `Primary device` switch, neither ends nor exhausts the recovery.
+If all three fail, the tray gives up on recovery and the
 ordinary scheduled polling takes over unchanged; the device stays
 `connected` and the last known battery level is retained, exactly as for
 any other `deviceNotResponding` failure. A second wake that arrives after
