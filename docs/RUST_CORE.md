@@ -43,4 +43,4 @@ The Rust core intentionally preserves the behavior already established by the Ja
 
 ## Windows transport status
 
-The real Windows HID battery transport has been validated on hardware (DeathAdder V3 Pro receiver, October 2026) and is the core's chosen production transport; see `docs/adr/0001-windows-hid-feature-reports-as-rust-core-transport.md`. It is still behind the `--experimental-hid-00b7` opt-in until #8 makes it the default. Synapse coexistence remains unverified and is tracked as a known limitation rather than a core blocker.
+The real Windows HID battery transport has been validated on hardware (DeathAdder V3 Pro receiver, October 2026) and is the core's chosen production transport; see `docs/adr/0001-windows-hid-feature-reports-as-rust-core-transport.md`. Since #8 it is the native tray's default transport, reported as `windows-hid`. Synapse coexistence remains unverified and is tracked as a known limitation rather than a core blocker.

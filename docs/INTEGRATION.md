@@ -45,7 +45,7 @@ The device list uses the same fields as `primaryDevice`.
 
 - `transportReady=false` means the selected battery transport is not available/implemented for use yet;
 - `transportReady=true, transportHealthy=false` means a real transport exists but recent device reads are failing;
-- `transportName` identifies the active transport implementation without exposing HID paths or other private hardware identifiers.
+- `transportName` identifies the active transport implementation without exposing HID paths or other private hardware identifiers. It is informational: consumers should branch on `transportReady` / `transportHealthy`, not on this string. The native tray reports `windows-hid` for the default Windows HID transport and `placeholder` for the `--placeholder-transport` debug run. Preview builds before #8 reported `windows-hid-00b7-experimental`; the value change is not a schema change because the field's type and meaning are unchanged.
 
 ## Privacy boundary
 

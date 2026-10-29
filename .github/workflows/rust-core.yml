@@ -77,22 +77,25 @@ jobs:
           The tray, settings, notifications, startup registration, single-instance
           protection, and read-only local integration API are implemented.
 
-          IMPORTANT:
-          Default startup still uses the placeholder transport and cannot
-          read battery values. A one-shot query on a real 1532:00B7 device
-          has succeeded, but sustained polling and Synapse coexistence
-          are not verified.
+          Default startup uses the native Windows HID transport (windows-hid)
+          and reads real battery values with no command-line flag:
+            .\RazerBatteryTaskbar-Native-Preview.exe
 
-          Experimental opt-in (after closing Synapse and Razer services):
-            .\RazerBatteryTaskbar-Native-Preview.exe --experimental-hid-00b7
-
-          The experimental profile targets only DeathAdder V3 Pro receiver
+          The transport currently targets only the DeathAdder V3 Pro receiver
           1532:00B7, MI_00, usage 0001:0002. It sends one battery query
           every 60 seconds or longer, reopens/releases its HID handle
           per read, and may fail when Windows or Synapse owns the interface.
-          Experimental HID will not auto-enable by default.
-          If the user explicitly enables Start with Windows while running
-          the opt-in mode, that same flag is preserved at login.
+          Synapse coexistence is not verified; close Synapse and Razer
+          services for the first run. Without a receiver the tray starts
+          normally and shows "No supported Razer devices detected".
+
+          Debug options:
+            --placeholder-transport   run without any battery transport
+            --experimental-hid-00b7   retired; accepted as a no-op
+
+          Start with Windows registers only the EXE path. Entries written by
+          earlier previews with the old flag still work and are rewritten
+          the next time the toggle is enabled.
           Keep this EXE in a permanent location before enabling startup.
 
           Integration endpoint:
@@ -193,8 +196,8 @@ jobs:
             .\RazerBatteryTaskbar-Battery-Once-Test.exe --help
             .\RazerBatteryTaskbar-Battery-Once-Test.exe --read-battery-once
 
-          The native tray remains on placeholder transport until the result
-          is physically verified and Synapse coexistence is evaluated.
+          The native tray already uses the same HID transport by default;
+          this tool remains a standalone one-shot diagnostic.
           "@ | Set-Content "dist/battery-once/README-BATTERY-TEST.txt" -Encoding utf8
 
       - name: Upload one-shot battery test

@@ -44,7 +44,7 @@ Before the Rust migration is finalized, HIDAPI / native Windows HID access shoul
 
 The Rust core's production Windows transport is native HID feature reports through `hidapi` (windows-native backend), opening the device's HID collection for one query at a time. The decision, the rejected alternatives (libusb / WinUSB), the hardware evidence, and the known limitations (Synapse coexistence unverified, single product ID until #18, 60 s minimum poll) are recorded in [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md). The Electron node-usb transport remains a legacy compatibility layer only.
 
-Phase 7 is complete. Remaining items are tracked as follow-ups: #8 (make the HID transport the default), #12 / #13 (reconnect latency), #16 (hibernate retest), #18 (wired PID).
+Phase 7 is complete and #8 made the HID transport the native tray's default. Remaining items are tracked as follow-ups: #12 / #13 (reconnect latency), #16 (hibernate retest), #18 (wired PID).
 
 ## Phase 7 exit criteria
 

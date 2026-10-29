@@ -5,7 +5,7 @@ date: 2026-10-29
 
 # Windows HID feature reports are the Rust core's battery transport
 
-The Rust core needed a Windows transport for Razer battery queries that works with the stock Razer driver stack. We chose native Windows HID access through `hidapi` (windows-native backend): enumerate the device's HID collections, open the one Razer exposes for its 90-byte protocol, send the battery request as a feature report, read the reply as a feature report, release the handle. This is the path the `windows-hid-00b7-experimental` profile already uses; it becomes the production transport, and the opt-in flag is retired in #8.
+The Rust core needed a Windows transport for Razer battery queries that works with the stock Razer driver stack. We chose native Windows HID access through `hidapi` (windows-native backend): enumerate the device's HID collections, open the one Razer exposes for its 90-byte protocol, send the battery request as a feature report, read the reply as a feature report, release the handle. This is the path the preview's `windows-hid-00b7-experimental` profile already used; it is the production transport, reported as `windows-hid`, and the opt-in flag was retired in #8.
 
 We chose it because it is the only candidate that never requires replacing or re-binding a device driver. libusb / WinUSB access (what the Electron compatibility build uses via node-usb) can require WinUSB ownership of the interface, which conflicts with the vendor driver and pushes users toward Zadig. The project's driver policy forbids that, so libusb was rejected for the Rust core even though it works in the Electron prototype.
 
@@ -28,5 +28,6 @@ Validated on a DeathAdder V3 Pro receiver (`1532:00B7`) in October 2026, see iss
 ## Consequences
 
 - The Electron node-usb transport is a legacy compatibility layer. New transport work happens only in the Rust core.
-- `PlaceholderTransport` stays the default until #8 lands; after that the native tray reads real battery data with no flag.
+- Since #8 the native tray starts with this transport and reads real battery data with no flag. `PlaceholderTransport` remains only as a debug option (`--placeholder-transport`) for UI and integration testing without hardware.
+- The 60 s minimum poll interval is enforced by the tray as its normal minimum (menu options and clamping of saved settings), not by the core.
 - Hibernate recovery (#16) and Synapse coexistence remain open validation items but do not reopen this decision.

@@ -48,11 +48,10 @@ The Windows tray exposes a Settings submenu for the commonly changed values.
 
 Polling interval choices:
 
-- 5 seconds;
-- 15 seconds;
-- 30 seconds;
 - 1 minute;
 - 5 minutes.
+
+The 60-second floor is a property of the Windows HID transport (ADR-0001), so the tray never offers shorter intervals. The core itself still accepts 5–3600 seconds in `settings.json`; a saved value below 60 is raised to 60 by the tray at startup and written back.
 
 Changing the polling interval updates the running scheduler immediately and triggers a refresh. Restarting the application is not required.
 

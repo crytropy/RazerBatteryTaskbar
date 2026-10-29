@@ -2,9 +2,11 @@
 
 The native Windows tray lives in `native/razer-tray`.
 
-It intentionally does not pretend the HID migration is complete. The shell currently uses a placeholder transport and reports:
+It starts with the native Windows HID battery transport by default (`windows-hid`, see [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md)); no command-line flag is needed to read real battery data. When no supported receiver is attached, the tray starts normally and reports:
 
-`Native shell ready — HID transport pending`
+`No supported Razer devices detected`
+
+For debugging without hardware, `--placeholder-transport` starts the tray with a transport that reads nothing and reports `transportReady=false`; the status line then says `Placeholder transport (debug) — no battery data`. The retired `--experimental-hid-00b7` flag is still accepted and is a no-op.
 
 ## Responsibilities
 
@@ -36,6 +38,8 @@ The Settings submenu contains:
 
 Changing the polling interval updates the active core worker immediately. It does not start another USB/HID thread and does not require an application restart.
 
+The polling interval menu offers 1 minute and 5 minutes. The 60-second minimum is a property of the Windows HID transport (one handle open/close and a 500 ms reply wait per query, ADR-0001), so shorter values are not offered; a `settings.json` saved by an earlier build with a shorter interval is raised to 60 seconds at startup and saved back.
+
 Threshold changes are validated before persistence. Critical-battery choices above the selected low-battery threshold are disabled.
 
 ## Start with Windows
@@ -62,13 +66,13 @@ Low battery uses normal urgency. Critical battery uses critical urgency. The not
 
 `Send test notification` bypasses the battery policy and notification-enabled setting on purpose. It sends one normal Windows notification so toast behavior can be verified without a real HID battery reading or waiting for a low-battery threshold.
 
-Runtime verification (October 2026, DeathAdder V3 Pro, `--experimental-hid-00b7`, thresholds low 20 % / critical 15 %; issue #6): the Windows toast fired once when the battery was already below the critical threshold at startup, did not repeat while the level stayed below the threshold, fired again after charging above the low threshold and discharging back below critical, and did not fire while the idle mouse was in `deviceNotResponding` with its last battery value retained. CI still verifies only compilation and unit tests and does not change the runner's startup registration.
+Runtime verification (October 2026, DeathAdder V3 Pro, HID transport enabled with the then-required `--experimental-hid-00b7` flag, thresholds low 20 % / critical 15 %; issue #6): the Windows toast fired once when the battery was already below the critical threshold at startup, did not repeat while the level stayed below the threshold, fired again after charging above the low threshold and discharging back below critical, and did not fire while the idle mouse was in `deviceNotResponding` with its last battery value retained. CI still verifies only compilation and unit tests and does not change the runner's startup registration.
 
 ## Next steps
 
 1. Collect HID Probe reports from real Razer hardware while Synapse is running.
-2. Validate which HID collections support battery requests without changing drivers.
-3. Replace `PlaceholderTransport` with the real HID transport after hardware validation.
+2. Validate Synapse coexistence with the default HID transport (known limitation in ADR-0001).
+3. Generalise the transport beyond the `00B7` receiver (#18).
 4. Add a primary-device selection menu when real devices are available.
 
 
@@ -82,11 +86,11 @@ The Rust workflow produces two clearly separated Windows artifacts.
 - `SHA256SUMS.txt`;
 - `README-NATIVE-PREVIEW.txt`.
 
-The README explicitly states that the real HID battery transport is not enabled yet, so the preview cannot be mistaken for the current compatibility build.
+The README states which receiver the HID transport currently supports and that Synapse coexistence is unverified, so the preview's scope cannot be mistaken for the Electron compatibility build's.
 
 `RazerBatteryTaskbar-HID-Probe` contains the read-only hardware enumeration probe, its SHA-256 checksum, and a diagnostic README.
 
-The Electron `Development Build` remains the usable compatibility build until native HID validation is complete.
+The Electron `Development Build` remains the compatibility build for hardware the native transport does not support yet.
 
 The HID Probe supports `--json` for structured reports, `--pid 0xNNNN` for a
 specific model, and `--known-only` to filter by the shared product database.
@@ -120,39 +124,40 @@ The worker is tested with a fake transport, without touching real hardware.
 Long-term HID reliability, physical reconnect behavior, and Windows sleep
 recovery still require real-device validation.
 
-## Experimental 00B7 native HID (explicit opt-in)
+## Default Windows HID transport (`windows-hid`)
 
-An actual one-shot HID battery query succeeded on a DeathAdder V3 Pro receiver:
-`VID=1532 PID=00B7`, `MI_00`, usage page `0001`, usage `0002`.
-The Razer reply acknowledged the command, passed transaction and checksum
-checks, and returned 78.8%. This validates real device/query functionality. The user also confirmed that
-battery reads work with Synapse both open and closed, but long-term
-polling stability and reconnect remain under test.
+The native tray starts with the Windows HID feature-report transport chosen
+in ADR-0001. It currently matches one receiver, the DeathAdder V3 Pro
+`VID=1532 PID=00B7`, `MI_00`, usage page `0001`, usage `0002`; generalising
+to other database entries is #18. Hot-plug, Windows sleep/wake, idle-mouse
+wake and a 16.5 h polling run were validated on that receiver in October
+2026 (`docs/TRANSPORT.md`). Synapse coexistence is unverified.
 
-Default startup continues to use `PlaceholderTransport`.
-
-To opt in from PowerShell after quitting Synapse and Razer services:
+Start it from PowerShell with no arguments:
 
 ```powershell
-.\RazerBatteryTaskbar-Native-Preview.exe --experimental-hid-00b7
+.\RazerBatteryTaskbar-Native-Preview.exe
 ```
 
-Experimental mode uses `windows-hid-00b7-experimental`, attempts only this
-specific product/interface/usage combination, and sends a battery query on
-launch and at intervals of **at least 60 seconds**. The 5/15/30-second
-poll options are disabled while it is active; the minimum is enforced
-regardless of earlier saved settings. It opens a handle for a single query
-then releases it, and does not change the Windows driver or mouse settings.
+The transport sends a battery query on launch and then at intervals of
+**at least 60 seconds**. It opens a handle for a single query, releases it,
+and does not change the Windows driver or mouse settings. With no matching
+receiver attached, reads succeed with an empty device list and the tray shows
+`No supported Razer devices detected`.
 
-It will stop reporting a stale reading when transport health fails,
-and will mark the device disconnected after the core's existing three-failure
-threshold. The local API reports `transportName`, `transportReady`,
-`transportHealthy`, and battery state so that external consumers can
-tell experimental reads from the normal placeholder mode.
+It stops reporting a stale reading when transport health fails, and marks
+the device disconnected after the core's existing three-failure threshold.
+The local API reports `transportName=windows-hid`, `transportReady`,
+`transportHealthy`, and battery state.
 
-The original Electron compatibility build remains the recommended
-everyday version until reconnect, repeated polling, and Synapse
-coexistence pass real-device testing.
+Debug options:
+
+- `--placeholder-transport` starts the tray without any battery transport
+  (`transportName=placeholder`, `transportReady=false`). It exists for UI
+  and integration testing on machines without a receiver.
+- `--experimental-hid-00b7` is the retired preview opt-in. It is accepted and
+  ignored; the process prints a notice that the HID transport is already the
+  default.
 
 ## Faster recovery after sleep / hibernation
 
@@ -165,8 +170,8 @@ the USB receiver time to re-enumerate before retrying.
 
 The event callback never opens an HID handle and never blocks the UI event
 loop. If power notification registration fails, normal scheduled polling
-remains available as a fallback. The existing experimental 60-second
-interval remains unchanged for ordinary polling; recovery refreshes are
+remains available as a fallback. The configured polling interval (60 s
+minimum) remains unchanged for ordinary polling; recovery refreshes are
 only sent after an actual Windows resume event.
 
 The user has confirmed successful resume recovery with the earlier polling
@@ -176,7 +181,7 @@ delay; it still requires real-device testing on Windows.
 
 ## HID read errors versus actual receiver disconnection
 
-The experimental Windows transport now classifies problems at the source:
+The Windows HID transport classifies problems at the source:
 enumeration, collection ambiguity, opening the HID collection, sending the
 feature query, receiving the reply, invalid response, device not responding,
 configuration, or unknown.
@@ -207,20 +212,18 @@ It prevents displaying an old percentage as current or conflating read
 availability with physical USB attachment.
 
 
-## Start with Windows and the experimental HID flag
+## Start with Windows and legacy flagged entries
 
 The tray's **Start with Windows** toggle writes a per-user Windows Run
-entry for the current executable. It now preserves the launch mode:
+entry containing only the quoted path of the current executable. Because
+the HID transport is the default, no launch flag is ever written.
 
-- Starting without arguments registers only the executable path;
-  the default placeholder mode remains the default after login.
-- Starting with `--experimental-hid-00b7` and explicitly enabling the
-  toggle registers the executable path **and the same opt-in flag**.
-  The next Windows login can therefore read 00B7 battery data.
-- Disabling the toggle removes the registration; changing launch modes
-  requires intentionally enabling startup again in the desired mode.
+Run entries created by earlier previews may still end in
+`--experimental-hid-00b7`. Such an entry is recognised as "enabled" on
+startup (so the toggle shows the real registration state) and is replaced
+with the plain executable path the next time the toggle is switched on.
+Until then the flag is harmless: the process accepts it as a no-op.
 
-No global experimental-HID setting or automatic mode migration is added.
 A copied/moved executable may require the startup toggle to be re-enabled
 to update the registered path. The executable should be kept in its
 permanent location before enabling startup.
@@ -236,6 +239,5 @@ battery data, and the most recent read duration. No persistent
 telemetry log, third-party network request, serial number, or
 HID path is introduced.
 
-After confirming that the experimental 00B7 transport can poll correctly,
-use the read-only local status endpoint to watch success/failure counts over
+Use the read-only local status endpoint to watch success/failure counts over
 a longer session. The counters reset when the EXE is restarted.
