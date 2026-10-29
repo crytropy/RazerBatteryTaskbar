@@ -43,7 +43,7 @@ function sample(overrides = {}) {
     charging: null,
   };
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     transportReady: true,
     transportHealthy: true,
     transportErrorKind: null,
@@ -128,8 +128,21 @@ test("displays unknown when battery is absent or invalid, not zero", () => {
 });
 
 test("shows a no-service marker for missing or unsupported API state", () => {
-  for (const snapshot of [null, undefined, sample({ schemaVersion: 2 }), sample({ transportReady: false })]) {
+  for (const snapshot of [null, undefined, sample({ schemaVersion: 3 }), sample({ transportReady: false })]) {
     assert.equal(render("template.js", snapshot), "Razer --");
+    assert.match(render("tooltip.js", snapshot), /unavailable|unsupported|not ready/);
+  }
+});
+
+test("accepts schema versions 1 and 2 alike", () => {
+  // Version 2 only changed what `failures` counts; the fields the plugin reads
+  // are identical, so a tray still serving version 1 keeps working.
+  for (const schemaVersion of [1, 2]) {
+    assert.equal(render("template.js", sample({ schemaVersion })), "[white:{PiBatteryMediumFill}] 64%");
+    assert.equal(
+      render("tooltip.js", sample({ schemaVersion })),
+      "Razer DeathAdder V3 Pro Wireless: 63.9%",
+    );
   }
 });
 

@@ -2,7 +2,9 @@ use serde::Serialize;
 
 use crate::frontend::{FrontendDeviceState, FrontendSnapshot, PollStatistics};
 
-pub const INTEGRATION_SCHEMA_VERSION: u32 = 1;
+/// Version 2: `pollStatistics.deviceNotResponding` was added and `failures`
+/// stopped counting those reads (a semantic change, see docs/INTEGRATION.md).
+pub const INTEGRATION_SCHEMA_VERSION: u32 = 2;
 pub const INTEGRATION_SERVICE_NAME: &str = "RazerBatteryTaskbar";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -116,7 +118,8 @@ mod tests {
             .to_json()
             .unwrap();
 
-        assert!(json.contains(r#""schemaVersion":1"#));
+        assert_eq!(INTEGRATION_SCHEMA_VERSION, 2);
+        assert!(json.contains(r#""schemaVersion":2"#));
         assert!(json.contains(r#""service":"RazerBatteryTaskbar""#));
         assert!(json.contains(r#""transportName":"scripted""#));
         assert!(json.contains(r#""transportReady":true"#));

@@ -4,13 +4,13 @@ RazerBatteryTaskbar exposes a transport-neutral, versioned snapshot for optional
 
 The contract lives in `razer-core::integration`. It is deliberately separate from HID, the Windows tray, and Seelen UI.
 
-## Schema version 1
+## Schema version 2
 
 Example:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "service": "RazerBatteryTaskbar",
   "coreVersion": "0.1.0",
   "transportName": "windows-hid",
@@ -71,6 +71,19 @@ Internal identifiers may be needed by the core to distinguish identical hardware
 Consumers must check `schemaVersion`.
 
 Fields may be added compatibly within a schema version. A breaking rename, semantic change, or field removal requires a new schema version.
+
+## Version history
+
+- **1** — initial contract: `transportName`, `transportReady`, `transportHealthy`,
+  `consecutiveTransportFailures`, `pollStatistics`, `primaryDevice`, `devices`.
+  `transportErrorKind` and the per-device `charging` field were added later
+  within version 1 as additive fields.
+- **2** — `pollStatistics.deviceNotResponding` was added and
+  `pollStatistics.failures` **no longer includes** those reads (see "Polling
+  statistics"). The new field alone would have been additive; the changed
+  meaning of `failures` is a semantic change, hence the bump. No field was
+  renamed or removed, so a consumer that does not interpret `failures` can
+  accept versions 1 and 2 alike; the bundled Seelen adapter does.
 
 ## Loopback HTTP transport
 
@@ -144,7 +157,7 @@ values and `connected` stays `true`, so integrations should treat them as
 No raw Windows error messages,
 serials, or device paths cross this JSON boundary.
 
-The public schema remains version 1 because this new field is additive.
+`transportErrorKind` was added within schema version 1 because the field is additive.
 
 
 ## Polling statistics
@@ -163,10 +176,10 @@ reset whenever the native tray process starts:
 - `lastBatteryReadUnixMs`: timestamp of the most recent successful scan which returned a battery percentage;
 - `lastDurationMs`: elapsed time for the most recent attempt, including any HID report response delay.
 
-`deviceNotResponding` was added to `pollStatistics` without changing the
-schema version, because the field is additive; `failures` and every other
-existing field keep their names, but `failures` no longer includes
-`deviceNotResponding` reads.
+`deviceNotResponding` was added to `pollStatistics` in schema version 2.
+`failures` and every other existing field keep their names, but `failures` no
+longer includes `deviceNotResponding` reads; that change of meaning is why
+the schema version was bumped rather than treated as an additive change.
 
 Times are UTC Unix epoch milliseconds. Timestamps are `null` until that event
 occurs. Counts reset on application restart and are not persisted to disk.
