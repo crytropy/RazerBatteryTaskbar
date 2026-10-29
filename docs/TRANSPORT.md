@@ -40,6 +40,12 @@ node-usb/libusb can require WinUSB-compatible access on Windows and driver owner
 
 Before the Rust migration is finalized, HIDAPI / native Windows HID access should be validated against the supported Razer devices and Razer Synapse. The goal is to preserve the normal Razer driver stack and avoid requiring users to modify device drivers.
 
+## Final transport choice
+
+The Rust core's production Windows transport is native HID feature reports through `hidapi` (windows-native backend), opening the device's HID collection for one query at a time. The decision, the rejected alternatives (libusb / WinUSB), the hardware evidence, and the known limitations (Synapse coexistence unverified, single product ID until #18, 60 s minimum poll) are recorded in [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md). The Electron node-usb transport remains a legacy compatibility layer only.
+
+Phase 7 is complete. Remaining items are tracked as follow-ups: #8 (make the HID transport the default), #12 / #13 (reconnect latency), #16 (hibernate retest), #18 (wired PID).
+
 ## Phase 7 exit criteria
 
 Phase 7 is complete when:
@@ -48,7 +54,7 @@ Phase 7 is complete when:
 2. Attach/detach and Windows resume trigger fast reconnects. ✅ Verified on hardware (#4); latency improvements tracked in #12 and #13.
 3. Temporary enumeration failures do not immediately erase state. ✅ Verified over a 16.5 h run (#5).
 4. Real hardware testing confirms behavior with and without Razer Synapse. ⚠️ Without Synapse: verified (#4, #5). With Synapse: not tested, recorded as a known limitation.
-5. A final transport choice for the Rust core is documented. ⏳ Tracked in #7.
+5. A final transport choice for the Rust core is documented. ✅ [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md) (#7).
 
 
 ## Read-only HID discovery probe

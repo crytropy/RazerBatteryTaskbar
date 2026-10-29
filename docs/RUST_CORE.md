@@ -41,6 +41,6 @@ The Rust core intentionally preserves the behavior already established by the Ja
 6. The device database has one source of truth: `src/devices/razer-products.json`.
 7. Three consecutive transport-wide failures are required before existing device state is disconnected.
 
-## Remaining hardware-dependent work
+## Windows transport status
 
-The only major core dependency still blocked on physical hardware validation is the real Windows HID battery transport. The existing HID probe remains read-only until the correct HID collection/interface is confirmed on supported hardware with Razer Synapse running.
+The real Windows HID battery transport has been validated on hardware (DeathAdder V3 Pro receiver, October 2026) and is the core's chosen production transport; see `docs/adr/0001-windows-hid-feature-reports-as-rust-core-transport.md`. It is still behind the `--experimental-hid-00b7` opt-in until #8 makes it the default. Synapse coexistence remains unverified and is tracked as a known limitation rather than a core blocker.

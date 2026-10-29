@@ -20,7 +20,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 4 | Move supported hardware into a maintainable device database | Complete |
 | 5 | Add multi-device support | Complete |
 | 6 | Add a device event system | Complete |
-| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Read errors classified separately from receiver removal; resume/reconnect regression pending |
+| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Complete — native HID feature reports chosen (ADR-0001); hot-plug, sleep/wake and 16.5 h polling verified on hardware; Synapse coexistence recorded as a known limitation |
 | 8 | Move the stable core to Rust | Core contracts migrated |
 | 9 | Build the lightweight Windows tray frontend | Tray + background worker + session poll diagnostics; long-run hardware testing pending |
 | 10 | Add persistent settings | Core/persistence + tray polling/threshold controls + primary preference + startup mode preservation complete |
@@ -42,7 +42,7 @@ The native tray shell lives in `native/razer-tray`. It owns the Windows event lo
 
 ## Phase 7 hardware validation
 
-Real hardware validation remains necessary for Synapse coexistence and HID collection selection. See `docs/TESTING.md` and `docs/TRANSPORT.md`.
+Hot-plug, Windows sleep/wake, idle-mouse wake and a 16.5 h polling run were verified on a DeathAdder V3 Pro receiver in October 2026 (issues #4, #5). The final transport choice is recorded in `docs/adr/0001-windows-hid-feature-reports-as-rust-core-transport.md`. Synapse coexistence is untested and recorded as a known limitation; hibernate recovery is retested after the opt-in flag is retired (#16, after #8). See `docs/TESTING.md` and `docs/TRANSPORT.md`.
 
 ## Native migration rule
 
