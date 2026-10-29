@@ -106,6 +106,7 @@ mod tests {
                 attempts: 10,
                 successes: 9,
                 failures: 1,
+                device_not_responding: 2,
                 last_duration_ms: Some(500),
                 ..PollStatistics::default()
             },
@@ -121,6 +122,7 @@ mod tests {
         assert!(json.contains(r#""transportReady":true"#));
         assert!(json.contains(r#""transportErrorKind":null"#));
         assert!(json.contains(r#""pollStatistics":{"attempts":10"#));
+        assert!(json.contains(r#""failures":1,"deviceNotResponding":2"#));
         assert!(json.contains(r#""lastDurationMs":500"#));
         assert!(json.contains(r#""deviceType":"mouse""#));
         assert!(json.contains(r#""productId":171"#));

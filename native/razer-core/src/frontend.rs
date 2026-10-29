@@ -33,7 +33,10 @@ impl From<&DeviceState> for FrontendDeviceState {
 pub struct PollStatistics {
     pub attempts: u64,
     pub successes: u64,
+    /// Real transport errors only; excludes `device_not_responding`.
     pub failures: u64,
+    /// Polls where the device answered busy/failure/timeout (usually asleep).
+    pub device_not_responding: u64,
     pub last_successful_scan_unix_ms: Option<u64>,
     pub last_battery_read_unix_ms: Option<u64>,
     pub last_duration_ms: Option<u64>,
