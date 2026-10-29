@@ -25,7 +25,7 @@ use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
 #[cfg(windows)]
 use razer_core::windows_hid::ExperimentalDeathAdderTransport;
-use settings_menu::SettingsMenu;
+use settings_menu::{MIN_POLL_INTERVAL_SECONDS, SettingsMenu};
 use single_instance::SingleInstance;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -35,7 +35,6 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::WindowId;
 
 const INSTANCE_NAME: &str = "RazerBatteryTaskbar.Native.Tray";
-const MIN_EXPERIMENTAL_POLL_SECONDS: u64 = 60;
 
 #[derive(Debug)]
 enum UserEvent {
@@ -132,7 +131,7 @@ impl TrayApplication {
     fn create_tray(&mut self) -> Result<(), Box<dyn Error>> {
         let menu = Menu::new();
         let status_item = MenuItem::new("Starting native core…", false, None);
-        let settings_menu = SettingsMenu::new(&self.settings, self.experimental_hid)?;
+        let settings_menu = SettingsMenu::new(&self.settings)?;
         let refresh_item = MenuItem::with_id("refresh", "Refresh", true, None);
         let quit_item = MenuItem::with_id("quit", "Quit", true, None);
 
@@ -233,7 +232,7 @@ impl TrayApplication {
     }
 
     fn set_poll_interval(&mut self, seconds: u64) {
-        if self.experimental_hid && seconds < MIN_EXPERIMENTAL_POLL_SECONDS {
+        if seconds < MIN_POLL_INTERVAL_SECONDS {
             return;
         }
 
@@ -569,12 +568,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (settings_store, mut settings) = load_settings();
     reconcile_startup_setting(settings_store.as_ref(), &mut settings);
 
-    // Do not write the experimental minimum into the user's persistent settings.
-    if experimental_hid {
-        settings.poll_interval_seconds = settings
-            .poll_interval_seconds
-            .max(MIN_EXPERIMENTAL_POLL_SECONDS);
-    }
+    settings.poll_interval_seconds = settings
+        .poll_interval_seconds
+        .max(MIN_POLL_INTERVAL_SECONDS);
 
     let transport = if experimental_hid {
         #[cfg(windows)]
