@@ -15,9 +15,9 @@ Validated on a DeathAdder V3 Pro receiver (`1532:00B7`) in October 2026, see iss
 
 ## Known limitations
 
-- **Synapse coexistence is unverified.** The test machine has no Razer Synapse installed. The chosen collection is a Generic Desktop Mouse top-level collection, which Windows documents as system-exclusive, so sharing it with Synapse is not guaranteed. The transport mitigates this by opening the handle once per poll, for the two feature queries of that poll (battery level, then charging status; about one second in total), and polling no more often than every 60 seconds. This is recorded as a known limitation for v1.0, not a release blocker; it becomes a blocker only if a user with Synapse reports conflicts.
+- **Synapse coexistence is unverified.** The test machine has no Razer Synapse installed. The chosen collection is a Generic Desktop Mouse top-level collection, which Windows documents as system-exclusive, so sharing it with Synapse is not guaranteed. The transport mitigates this by opening the handle once per poll, for the two feature queries of that poll (battery level, then charging status; about one second in total), and polling no more often than every 10 seconds (60 seconds by default). This is recorded as a known limitation for v1.0, not a release blocker; it becomes a blocker only if a user with Synapse reports conflicts.
 - **One device model at a time.** The transport currently matches a single device model (the DeathAdder V3 Pro) and one interface/usage combination. Since #18 the model's wired and wireless product IDs (`00B6` / `00B7`) are read as one logical device through the device database's `pairing` annotation, with the wired twin preferred when both are enumerated; the cable path is still awaiting its hardware check. Generalising to other database entries is later work; neither changes the transport mechanism.
-- **Minimum poll interval of 60 s** is a property of this transport (one handle open/close per poll, two queries each waiting 500 ms for the reply), not of the core.
+- **Minimum poll interval of 10 s** is a property of this transport (one handle open/close per poll, two queries each waiting 500 ms for the reply, about 1.2 s in total), not of the core. It was 60 s until issue #22: plugging or unplugging the charging cable while the receiver is connected raises no USB device event, so the poll interval is the only bound on how quickly the charging state is noticed. The default stays 60 s; 10 s has not had a multi-hour hardware run yet.
 
 ## Considered options
 
@@ -29,5 +29,5 @@ Validated on a DeathAdder V3 Pro receiver (`1532:00B7`) in October 2026, see iss
 
 - The Electron node-usb transport is a legacy compatibility layer. New transport work happens only in the Rust core.
 - Since #8 the native tray starts with this transport and reads real battery data with no flag. `PlaceholderTransport` remains only as a debug option (`--placeholder-transport`) for UI and integration testing without hardware.
-- The 60 s minimum poll interval is enforced by the tray as its normal minimum (menu options and clamping of saved settings), not by the core.
+- The 10 s minimum poll interval is enforced by the tray as its normal minimum (menu options and clamping of saved settings), not by the core.
 - Hibernate recovery (#16) and Synapse coexistence remain open validation items but do not reopen this decision.
