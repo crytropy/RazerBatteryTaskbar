@@ -49,7 +49,7 @@ The Settings submenu contains:
 
 Changing the polling interval updates the active core worker immediately. It does not start another USB/HID thread and does not require an application restart.
 
-The polling interval menu offers 1 minute and 5 minutes. The 60-second minimum is a property of the Windows HID transport (one handle open/close and a 500 ms reply wait per query, ADR-0001), so shorter values are not offered; a `settings.json` saved by an earlier build with a shorter interval is raised to 60 seconds at startup and saved back.
+The polling interval menu offers 1 minute and 5 minutes. The 60-second minimum is a property of the Windows HID transport (one handle open/close per poll and a 500 ms reply wait for each of its two queries, ADR-0001), so shorter values are not offered; a `settings.json` saved by an earlier build with a shorter interval is raised to 60 seconds at startup and saved back.
 
 Threshold changes are validated before persistence. Critical-battery choices above the selected low-battery threshold are disabled.
 

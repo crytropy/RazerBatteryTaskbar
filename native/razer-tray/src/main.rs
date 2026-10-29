@@ -137,6 +137,9 @@ fn parse_launch_options(args: &[String]) -> Result<LaunchOptions, String> {
     match args {
         [] => Ok(LaunchOptions::Run(TransportChoice::WindowsHid)),
         [option] if option == LEGACY_HID_FLAG => {
+            // Release builds use windows_subsystem = "windows", so this notice
+            // has no console to land in; it is visible only in debug runs and
+            // when stderr is redirected. The flag is accepted either way.
             eprintln!(
                 "{LEGACY_HID_FLAG} is a no-op: the Windows HID transport is already the default."
             );
@@ -151,7 +154,7 @@ fn parse_launch_options(args: &[String]) -> Result<LaunchOptions, String> {
 }
 
 fn print_help() {
-    println!("RazerBatteryTaskbar Native Preview");
+    println!("RazerBatteryTaskbar Native");
     println!("Usage: razer-tray.exe [{PLACEHOLDER_FLAG}]");
     println!("Starts with the native Windows HID battery transport by default.");
     println!("  {PLACEHOLDER_FLAG}   debug only: run without any battery transport");
