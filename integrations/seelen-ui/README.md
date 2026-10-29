@@ -28,7 +28,7 @@ existing resume-triggered recovery polls.
 
 ## Local setup and verification
 
-1. Run `RazerBatteryTaskbar-Native-Preview.exe` (no arguments) on a
+1. Run `RazerBatteryTaskbar-Native-<version>.exe` (no arguments) on a
    supported DeathAdder V3 Pro 1532:00B7 receiver. Start the native EXE only
    once. The Windows HID transport is the default.
 2. Confirm the read-only API works from PowerShell:

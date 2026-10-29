@@ -20,7 +20,7 @@ https://github.com/crytropy/RazerBatteryTaskbar/releases/tag/dev-build
 
 只要 `main` 上與相容版執行環境相關的程式碼有變動，這個開發版就會自動重新建置。
 
-### 原生預覽版（Native Preview）：架構與 UI 測試用
+### 原生版（Native）：輕量系統匣程式
 
 Rust 原生系統匣已經能以輕量 Windows 系統匣程式的形式執行，包含：
 
@@ -38,31 +38,35 @@ Rust 原生系統匣已經能以輕量 Windows 系統匣程式的形式執行，
 
 **預設啟動即使用原生 Windows HID 傳輸層（`windows-hid`），不需要任何參數。** 目前支援的硬體為 DeathAdder V3 Pro（接收器 1532:00B7 與有線模式 1532:00B6 視為同一隻裝置，#18）；其他硬體尚未啟用。在這顆接收器上，持續輪詢、拔插／睡眠喚醒後的自動重連、以及滑鼠休眠時的處理（保留上次電量）都已經過數小時的實機驗證；與 Synapse 共存則尚未驗證。沒有接上接收器時程式仍會正常啟動，托盤顯示未偵測到裝置。
 
-解壓縮原生預覽版後，先關閉 Synapse 與 Razer 相關服務，再直接執行：
+下載原生版後，先關閉 Synapse 與 Razer 相關服務，再直接執行：
 
 ```powershell
-.\RazerBatteryTaskbar-Native-Preview.exe
+.\RazerBatteryTaskbar-Native-<版本>.exe
 ```
 
 程式會在啟動時送出一次電量查詢，之後每次查詢至少間隔 60 秒（輪詢間隔選單只提供 1 分鐘與 5 分鐘，舊設定檔中較短的間隔會在啟動時提高到 60 秒）。舊的 `--experimental-hid-00b7` 參數仍可接受，但只是 no-op；`--placeholder-transport` 則是沒有硬體時用來測試介面的除錯選項。使用前請先閱讀 [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md)。
 
-最新預覽版可從 **Rust Native Preview** 工作流程的 artifact 取得：
+正式版請到 GitHub Releases 下載（檔名中的 `<版本>` 為 tag 去掉開頭的 `v`）：
+
+https://github.com/crytropy/RazerBatteryTaskbar/releases
+
+每個 Release 內含：
+
+- `RazerBatteryTaskbar-Native-<版本>.exe`
+- `SHA256SUMS.txt`（執行檔的 SHA-256，可用 `Get-FileHash` 核對）
+- `README-NATIVE.txt`
+
+標示為 Pre-release 的版本（例如 `v1.0.0-rc.1`）是發行前的預覽。`main` 分支的最新原生版會附在
+[dev-build](https://github.com/crytropy/RazerBatteryTaskbar/releases/tag/dev-build) 預先發行版中（`RazerBatteryTaskbar-Native-dev.exe`），
+另可從 **Rust Native** 工作流程的 artifact `RazerBatteryTaskbar-Native` 取得：
 
 https://github.com/crytropy/RazerBatteryTaskbar/actions/workflows/rust-core.yml
 
-Artifact：
-
-`RazerBatteryTaskbar-Native-Preview`
-
-內容包含：
-
-- `RazerBatteryTaskbar-Native-Preview.exe`
-- `SHA256SUMS.txt`
-- `README-NATIVE-PREVIEW.txt`
+Electron 安裝檔若出現在 Release 中，一律標示為 legacy／相容版，僅供原生版尚未支援的硬體使用。
 
 ### HID Probe：硬體驗證工具
 
-同一個 Rust 工作流程也會產出：
+同一個 Rust 工作流程（Rust Native）也會產出：
 
 `RazerBatteryTaskbar-HID-Probe`
 
@@ -189,6 +193,25 @@ npm test
 ```powershell
 npm run make
 ```
+
+## 發行流程（Releasing）
+
+推一個 `v*` tag 就會自動產生 GitHub Release，不需要手動上傳：
+
+1. 確認 `main` 上的 CI 全綠，並把 `native/razer-core/Cargo.toml`、`native/razer-tray/Cargo.toml` 的 `version` 調成與 tag 相同（例如 `1.0.0`；程式回報的是 Cargo 版本，不一致時工作流程只會警告）。
+2. 建立並推送 tag：
+
+   ```powershell
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+
+   發行前的預覽請用帶後綴的 tag，例如 `v1.0.0-rc.1`，Release 會自動標為 Pre-release。
+3. **Rust Native** 工作流程會執行 `fmt`／`clippy`／測試並建置 release 版 `razer-tray.exe`，再建立 Release（release notes 自動產生），附上 `RazerBatteryTaskbar-Native-<版本>.exe`、`SHA256SUMS.txt` 與 `README-NATIVE.txt`。
+4. **Build Windows**（Electron）工作流程對同一個 tag 也會執行，並把 `RazerBatteryTaskbar-Windows-Setup.exe` 附到同一個 Release，說明中標示為 legacy／相容版。兩個工作流程互不覆寫對方的檔案，誰先完成都沒有關係。
+5. 到 Release 頁面確認檔案、`SHA256SUMS.txt` 與 Pre-release 標記無誤。
+
+若要撤回有問題的預覽 tag：`gh release delete v1.0.0-rc.1 --cleanup-tag`，再重新推 tag。
 
 ## 建置 Rust 工作區
 

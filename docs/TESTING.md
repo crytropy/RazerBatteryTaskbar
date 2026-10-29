@@ -31,7 +31,7 @@ The copied diagnostics include application/runtime versions, transport state, VI
 The native transport is still disabled. The separate HID Probe can collect the
 non-invasive information needed to choose candidate HID collections for later
 testing. Download the `RazerBatteryTaskbar-HID-Probe` artifact from the latest
-[Rust Native Preview workflow](https://github.com/crytropy/RazerBatteryTaskbar/actions/workflows/rust-core.yml),
+[Rust Native workflow](https://github.com/crytropy/RazerBatteryTaskbar/actions/workflows/rust-core.yml),
 extract the ZIP, and open PowerShell in the extracted directory.
 
 ```powershell
@@ -132,12 +132,12 @@ still need validation.
 A one-shot query on the user's device succeeded and returned `Battery: 78.8%`
 with a verified acknowledgement and checksum.
 
-The Rust Native Preview starts with the Windows HID transport by default.
+The native tray starts with the Windows HID transport by default.
 With Synapse and Razer background services closed, launch it with no
 arguments:
 
 ```powershell
-.\RazerBatteryTaskbar-Native-Preview.exe
+.\RazerBatteryTaskbar-Native-<version>.exe
 ```
 
 Check the tray battery percentage and the versioned status JSON:
@@ -189,7 +189,7 @@ Do not substitute driver changes for an inaccessible HID interface.
 
 ## Session-level polling health checks
 
-The Native Preview exposes `pollStatistics` in its read-only local API.
+The native tray exposes `pollStatistics` in its read-only local API.
 With the native tray running:
 
 ```powershell
