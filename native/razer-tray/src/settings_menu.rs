@@ -3,19 +3,13 @@ use std::error::Error;
 use razer_core::settings::AppSettings;
 use tray_icon::menu::{CheckMenuItem, MenuEvent, MenuItem, Submenu};
 
-/// Shortest polling interval the tray offers. One poll opens the HID handle
-/// once and spends about 1.2 s on its two queries, so 10 s keeps the handle
-/// busy barely 12 % of the time (ADR-0001). Charging-state changes have no
-/// USB event to trigger a rescan (issue #22), so the poll interval is the only
-/// thing that bounds how quickly the icon follows them. The default stays 60 s.
-pub const MIN_POLL_INTERVAL_SECONDS: u64 = 10;
-
-const POLL_INTERVAL_OPTIONS: &[(u64, &str)] = &[
-    (10, "10 seconds"),
-    (30, "30 seconds"),
-    (60, "1 minute"),
-    (300, "5 minutes"),
-];
+/// The native tray polls at a fixed interval; there is no menu for it. One
+/// poll opens the HID handle once and spends about 1.2 s on its two queries
+/// (ADR-0001), so 10 s keeps the handle idle most of the time while still
+/// letting the icon follow the charging cable within seconds: the cable raises
+/// no USB event while the receiver is connected (issue #22), so the poll is
+/// the only thing that notices it. Issue #24 removed the user-facing option.
+pub const POLL_INTERVAL_SECONDS: u64 = 10;
 
 const LOW_BATTERY_OPTIONS: &[(u8, &str)] = &[
     (10, "10%"),
@@ -32,7 +26,6 @@ pub struct SettingsMenu {
     notifications_item: CheckMenuItem,
     test_notification_item: MenuItem,
     start_with_windows_item: CheckMenuItem,
-    poll_interval_items: Vec<(u64, CheckMenuItem)>,
     low_battery_items: Vec<(u8, CheckMenuItem)>,
     critical_battery_items: Vec<(u8, CheckMenuItem)>,
 }
@@ -97,24 +90,6 @@ impl SettingsMenu {
             .collect::<Result<Vec<_>, tray_icon::menu::Error>>()?;
         root.append(&critical_battery_menu)?;
 
-        let poll_interval_menu =
-            Submenu::with_id("settings.poll-interval", "Polling interval", true);
-        let poll_interval_items = POLL_INTERVAL_OPTIONS
-            .iter()
-            .map(|(seconds, label)| {
-                let item = CheckMenuItem::with_id(
-                    format!("settings.poll-interval.{seconds}"),
-                    label,
-                    true,
-                    settings.poll_interval_seconds == *seconds,
-                    None,
-                );
-                poll_interval_menu.append(&item)?;
-                Ok((*seconds, item))
-            })
-            .collect::<Result<Vec<_>, tray_icon::menu::Error>>()?;
-        root.append(&poll_interval_menu)?;
-
         let start_with_windows_item = CheckMenuItem::with_id(
             "settings.start-with-windows",
             "Start with Windows",
@@ -129,7 +104,6 @@ impl SettingsMenu {
             notifications_item,
             test_notification_item,
             start_with_windows_item,
-            poll_interval_items,
             low_battery_items,
             critical_battery_items,
         };
@@ -150,12 +124,6 @@ impl SettingsMenu {
         event.id == *self.start_with_windows_item.id()
     }
 
-    pub fn poll_interval_for_event(&self, event: &MenuEvent) -> Option<u64> {
-        self.poll_interval_items
-            .iter()
-            .find_map(|(seconds, item)| (event.id == *item.id()).then_some(*seconds))
-    }
-
     pub fn low_battery_for_event(&self, event: &MenuEvent) -> Option<u8> {
         self.low_battery_items
             .iter()
@@ -174,10 +142,6 @@ impl SettingsMenu {
         self.start_with_windows_item
             .set_checked(settings.start_with_windows);
 
-        for (seconds, item) in &self.poll_interval_items {
-            item.set_checked(settings.poll_interval_seconds == *seconds);
-        }
-
         for (percent, item) in &self.low_battery_items {
             item.set_checked(settings.notifications.low_battery_percent == *percent);
         }
@@ -194,42 +158,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_polling_options_are_valid_core_settings() {
-        for (seconds, _) in POLL_INTERVAL_OPTIONS {
-            let settings = AppSettings {
-                poll_interval_seconds: *seconds,
-                ..AppSettings::default()
-            };
-            settings.validate().unwrap();
-        }
-    }
-
-    #[test]
-    fn polling_options_never_go_below_the_hid_transport_minimum() {
-        assert!(!POLL_INTERVAL_OPTIONS.is_empty());
-        for (seconds, _) in POLL_INTERVAL_OPTIONS {
-            assert!(
-                *seconds >= MIN_POLL_INTERVAL_SECONDS,
-                "{seconds} s is below the {MIN_POLL_INTERVAL_SECONDS} s minimum of the Windows HID transport"
-            );
-        }
-        assert!(
-            POLL_INTERVAL_OPTIONS
-                .iter()
-                .any(|(seconds, _)| *seconds == MIN_POLL_INTERVAL_SECONDS),
-            "the minimum itself must be selectable"
+    fn fixed_poll_interval_is_a_valid_core_setting_and_the_core_default() {
+        assert_eq!(POLL_INTERVAL_SECONDS, 10);
+        let settings = AppSettings {
+            poll_interval_seconds: POLL_INTERVAL_SECONDS,
+            ..AppSettings::default()
+        };
+        settings.validate().unwrap();
+        assert_eq!(
+            AppSettings::default().poll_interval_seconds,
+            POLL_INTERVAL_SECONDS
         );
     }
 
     #[test]
-    fn polling_menu_offers_ten_and_thirty_seconds_and_keeps_the_sixty_second_default() {
-        assert_eq!(MIN_POLL_INTERVAL_SECONDS, 10);
-        let offered: Vec<u64> = POLL_INTERVAL_OPTIONS.iter().map(|(s, _)| *s).collect();
-        assert_eq!(offered, vec![10, 30, 60, 300]);
-        // The default interval is unchanged: lowering the minimum must not make
-        // every existing user poll six times as often.
-        assert_eq!(AppSettings::default().poll_interval_seconds, 60);
-        assert!(offered.contains(&AppSettings::default().poll_interval_seconds));
+    fn settings_menu_has_no_poll_interval_entry() {
+        let menu = SettingsMenu::new(&AppSettings::default()).unwrap();
+        let ids: Vec<String> = menu
+            .root
+            .items()
+            .iter()
+            .map(|item| item.id().0.clone())
+            .collect();
+        assert!(!ids.is_empty());
+        assert!(
+            ids.iter().all(|id| !id.contains("poll-interval")),
+            "poll interval must not be user-configurable: {ids:?}"
+        );
     }
 
     #[test]

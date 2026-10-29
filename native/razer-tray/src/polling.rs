@@ -17,7 +17,6 @@ pub struct CoreUpdate {
 
 enum WorkerCommand {
     Refresh,
-    SetInterval(Duration),
     SetNotifications(NotificationSettings),
     SetPrimaryDevice(PrimaryDevicePreference),
     Stop,
@@ -65,15 +64,6 @@ impl CoreWorker {
         self.sender.send(WorkerCommand::Refresh).is_ok()
     }
 
-    pub fn set_interval(&self, interval: Duration) -> bool {
-        if interval.is_zero() {
-            return false;
-        }
-        self.sender
-            .send(WorkerCommand::SetInterval(interval))
-            .is_ok()
-    }
-
     pub fn set_notifications(&self, settings: NotificationSettings) -> bool {
         self.sender
             .send(WorkerCommand::SetNotifications(settings))
@@ -100,16 +90,11 @@ impl Drop for CoreWorker {
 fn apply_command<T: BatteryTransport>(
     command: WorkerCommand,
     core: &mut CoreService<T>,
-    interval: &mut Duration,
     notifications: &mut NotificationSettings,
     pending: &mut Pending,
 ) -> bool {
     match command {
         WorkerCommand::Refresh => pending.refresh = true,
-        WorkerCommand::SetInterval(next) => {
-            *interval = next;
-            pending.refresh = true;
-        }
         WorkerCommand::SetNotifications(next) => *notifications = next,
         WorkerCommand::SetPrimaryDevice(preference) => {
             core.set_primary_device_preference(preference);
@@ -124,7 +109,7 @@ fn apply_command<T: BatteryTransport>(
 fn run_worker<T, F>(
     mut core: CoreService<T>,
     receiver: Receiver<WorkerCommand>,
-    mut interval: Duration,
+    interval: Duration,
     mut notifications: NotificationSettings,
     mut on_update: F,
 ) where
@@ -141,13 +126,7 @@ fn run_worker<T, F>(
         loop {
             match receiver.try_recv() {
                 Ok(command) => {
-                    if !apply_command(
-                        command,
-                        &mut core,
-                        &mut interval,
-                        &mut notifications,
-                        &mut pending,
-                    ) {
+                    if !apply_command(command, &mut core, &mut notifications, &mut pending) {
                         return;
                     }
                 }
@@ -181,13 +160,7 @@ fn run_worker<T, F>(
 
         match receiver.recv_timeout(interval) {
             Ok(command) => {
-                if !apply_command(
-                    command,
-                    &mut core,
-                    &mut interval,
-                    &mut notifications,
-                    &mut pending,
-                ) {
+                if !apply_command(command, &mut core, &mut notifications, &mut pending) {
                     return;
                 }
             }
@@ -282,30 +255,6 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         // A burst is coalesced instead of opening ten concurrent device handles.
         assert!(reads.load(Ordering::SeqCst) <= 3);
-        drop(worker);
-    }
-
-    #[test]
-    fn polling_interval_change_wakes_worker_without_restarting_it() {
-        let (sender, receiver) = mpsc::channel();
-
-        let worker = CoreWorker::start(
-            TestTransport {
-                reads: Arc::new(AtomicUsize::new(0)),
-            },
-            Duration::from_secs(60),
-            NotificationSettings::default(),
-            PrimaryDevicePreference::Auto,
-            move |_| sender.send(()).is_ok(),
-        );
-
-        receiver.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert!(worker.set_interval(Duration::from_millis(20)));
-        receiver.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert!(worker.set_notifications(NotificationSettings {
-            enabled: false,
-            ..NotificationSettings::default()
-        }));
         drop(worker);
     }
 

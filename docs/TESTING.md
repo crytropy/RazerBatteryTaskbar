@@ -174,7 +174,7 @@ Rust CI runs unit tests with a fake transport to ensure that:
 
 - the first device read occurs on a background thread, not the UI caller thread;
 - a burst of manual refresh requests is coalesced, not issued in parallel;
-- a changed polling interval takes effect without restarting the worker.
+- a primary-device change republishes the snapshot without an extra HID read.
 
 The actual DeathAdder V3 Pro has now returned verified battery data through
 the Native Tray and JSON status API; the user reports successful reads both

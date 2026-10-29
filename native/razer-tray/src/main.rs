@@ -32,7 +32,7 @@ use razer_core::transport::{BatteryTransport, TransportError};
 #[cfg(windows)]
 use razer_core::windows_hid::WindowsHidTransport;
 use resume_recovery::{RecoveryOutcome, RecoveryTick, ResumeRecovery};
-use settings_menu::{MIN_POLL_INTERVAL_SECONDS, SettingsMenu};
+use settings_menu::{POLL_INTERVAL_SECONDS, SettingsMenu};
 use single_instance::SingleInstance;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -174,11 +174,12 @@ fn canonicalize_primary_device(settings: &mut AppSettings) -> bool {
     true
 }
 
-/// Raise a saved poll interval to the Windows HID transport's minimum.
-/// Returns `true` when the settings were changed.
-fn clamp_poll_interval(settings: &mut AppSettings) -> bool {
-    if settings.poll_interval_seconds < MIN_POLL_INTERVAL_SECONDS {
-        settings.poll_interval_seconds = MIN_POLL_INTERVAL_SECONDS;
+/// The native tray always polls every `POLL_INTERVAL_SECONDS`; a different
+/// value left in `settings.json` by an earlier build is rewritten so the file
+/// matches what actually runs. Returns `true` when the settings were changed.
+fn normalize_poll_interval(settings: &mut AppSettings) -> bool {
+    if settings.poll_interval_seconds != POLL_INTERVAL_SECONDS {
+        settings.poll_interval_seconds = POLL_INTERVAL_SECONDS;
         return true;
     }
 
@@ -349,20 +350,6 @@ impl TrayApplication {
         self.persist_settings("notification setting");
     }
 
-    fn set_poll_interval(&mut self, seconds: u64) {
-        if seconds < MIN_POLL_INTERVAL_SECONDS {
-            return;
-        }
-
-        self.settings.poll_interval_seconds = seconds;
-        self.sync_settings_menu();
-        self.persist_settings("poll interval");
-
-        if !self.worker.set_interval(Duration::from_secs(seconds)) {
-            eprintln!("failed to update active poll interval");
-        }
-    }
-
     fn set_low_battery_threshold(&mut self, percent: u8) {
         self.settings.notifications.low_battery_percent = percent;
 
@@ -436,15 +423,6 @@ impl TrayApplication {
             .is_some_and(|menu| menu.is_start_with_windows_event(&event));
         if start_with_windows_event {
             self.toggle_start_with_windows();
-            return;
-        }
-
-        let poll_interval = self
-            .settings_menu
-            .as_ref()
-            .and_then(|menu| menu.poll_interval_for_event(&event));
-        if let Some(seconds) = poll_interval {
-            self.set_poll_interval(seconds);
             return;
         }
 
@@ -774,7 +752,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (settings_store, mut settings) = load_settings();
     reconcile_startup_setting(settings_store.as_ref(), &mut settings);
 
-    let clamped = clamp_poll_interval(&mut settings);
+    let clamped = normalize_poll_interval(&mut settings);
     let canonicalized = canonicalize_primary_device(&mut settings);
     if (clamped || canonicalized)
         && let Some(store) = settings_store.as_ref()
@@ -785,7 +763,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let transport = transport_choice.into_transport()?;
 
-    let initial_poll_interval = Duration::from_secs(settings.poll_interval_seconds);
+    let initial_poll_interval = Duration::from_secs(POLL_INTERVAL_SECONDS);
 
     let integration_state = api::initial_state(transport.name(), transport.is_ready());
     let _api_thread = match api::start(integration_state.clone()) {
@@ -1029,27 +1007,21 @@ mod tests {
     }
 
     #[test]
-    fn saved_poll_intervals_below_the_transport_minimum_are_clamped() {
-        let mut settings = AppSettings {
-            poll_interval_seconds: 5,
-            ..AppSettings::default()
-        };
-        assert!(clamp_poll_interval(&mut settings));
-        assert_eq!(settings.poll_interval_seconds, 10);
-
-        // Values at or above the minimum are left alone, including the 60 s
-        // default saved by earlier builds and the new 30 s option.
-        for seconds in [10, 30, 60, 300] {
+    fn saved_poll_intervals_are_normalized_to_the_fixed_interval() {
+        for seconds in [5, 30, 60, 300] {
             let mut settings = AppSettings {
                 poll_interval_seconds: seconds,
                 ..AppSettings::default()
             };
-            assert!(
-                !clamp_poll_interval(&mut settings),
-                "{seconds} s was clamped"
-            );
-            assert_eq!(settings.poll_interval_seconds, seconds);
+            assert!(normalize_poll_interval(&mut settings), "{seconds} s kept");
+            assert_eq!(settings.poll_interval_seconds, POLL_INTERVAL_SECONDS);
         }
+
+        let mut settings = AppSettings {
+            poll_interval_seconds: POLL_INTERVAL_SECONDS,
+            ..AppSettings::default()
+        };
+        assert!(!normalize_poll_interval(&mut settings));
     }
 
     #[test]

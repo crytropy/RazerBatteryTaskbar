@@ -17,7 +17,7 @@ Current settings:
 
 The default values are:
 
-- poll every 60 seconds;
+- poll every 10 seconds (the native tray always uses this value);
 - automatic primary-device selection;
 - notifications enabled;
 - low battery at 20%;
@@ -46,16 +46,7 @@ Notification payloads use the serial-free frontend device state, so serial numbe
 
 The Windows tray exposes a Settings submenu for the commonly changed values.
 
-Polling interval choices:
-
-- 10 seconds;
-- 30 seconds;
-- 1 minute (default);
-- 5 minutes.
-
-The 10-second floor is a property of the Windows HID transport (ADR-0001: one handle open and about 1.2 s of queries per poll), so the tray never offers shorter intervals. The core itself still accepts 5–3600 seconds in `settings.json`; a saved value below 10 is raised to 10 by the tray at startup and written back. Shorter intervals matter mainly for the charging state: the cable produces no USB event while the receiver is connected, so the icon can only follow it at the next poll.
-
-Changing the polling interval updates the running scheduler immediately and triggers a refresh. Restarting the application is not required.
+The polling interval is not user-configurable: the native tray polls every 10 seconds. One poll opens the HID handle once and spends about 1.2 s on its two queries (ADR-0001), and the charging cable raises no USB event while the receiver is connected, so 10 s is what lets the charging state and icon colour follow the cable within seconds without keeping the handle busy. `pollIntervalSeconds` stays in `settings.json` for the core and other frontends (5–3600 s accepted), but the tray rewrites any other value to 10 at startup.
 
 Low-battery threshold choices are 10%, 15%, 20%, 25%, and 30%.
 

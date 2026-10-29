@@ -115,7 +115,7 @@ jobs:
           The transport currently targets only the DeathAdder V3 Pro, over its
           receiver 1532:00B7 or its USB cable 1532:00B6 (one device), MI_00,
           usage 0001:0002. It sends one battery query
-          every 10 seconds or longer (60 seconds by default), reopens/releases its HID handle
+          every 10 seconds, reopens/releases its HID handle
           per read, and may fail when Windows or Synapse owns the interface.
           Synapse coexistence is not verified; close Synapse and Razer
           services for the first run. Without a receiver the tray starts

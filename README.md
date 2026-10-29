@@ -44,7 +44,7 @@ Rust 原生系統匣已經能以輕量 Windows 系統匣程式的形式執行，
 .\RazerBatteryTaskbar-Native-<版本>.exe
 ```
 
-程式會在啟動時送出一次電量查詢，之後依設定的間隔輪詢（選單提供 10 秒、30 秒、1 分鐘（預設）、5 分鐘；舊設定檔中低於 10 秒的間隔會在啟動時提高到 10 秒）。接收器插著時，插拔充電線不會產生 USB 事件，所以充電狀態與圖示顏色要到下一次輪詢才更新；想要幾秒內跟上就選 10 秒。舊的 `--experimental-hid-00b7` 參數仍可接受，但只是 no-op；`--placeholder-transport` 則是沒有硬體時用來測試介面的除錯選項。使用前請先閱讀 [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md)。
+程式會在啟動時送出一次電量查詢，之後固定每 10 秒輪詢一次（沒有選項；舊設定檔中的其他值會在啟動時改寫成 10）。接收器插著時，插拔充電線不會產生 USB 事件，所以充電狀態與圖示顏色靠這 10 秒一次的輪詢更新。舊的 `--experimental-hid-00b7` 參數仍可接受，但只是 no-op；`--placeholder-transport` 則是沒有硬體時用來測試介面的除錯選項。使用前請先閱讀 [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md)。
 
 正式版請到 GitHub Releases 下載（檔名中的 `<版本>` 為 tag 去掉開頭的 `v`）：
 
