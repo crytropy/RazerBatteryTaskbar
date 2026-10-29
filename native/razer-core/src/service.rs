@@ -439,6 +439,46 @@ mod tests {
     }
 
     #[test]
+    fn sleeping_device_keeps_last_charging_state_like_battery() {
+        let charging_mouse = DeviceReading {
+            charging: Some(true),
+            ..mouse_reading(80.0)
+        };
+        let transport = ScriptedTransport::new(vec![
+            Ok(vec![charging_mouse]),
+            Err(TransportError::with_kind(
+                TransportErrorKind::DeviceNotResponding,
+                "Razer status 0x03 (failure)",
+            )),
+            // Battery answered but the charging query failed: charging is
+            // unknown, the battery is updated and the device stays connected.
+            Ok(vec![mouse_reading(79.0)]),
+        ]);
+        let mut service = CoreService::new(transport);
+
+        let connected = service.refresh();
+        assert_eq!(connected.devices[0].charging, Some(true));
+
+        let asleep = service.refresh();
+        assert!(asleep.events.is_empty());
+        assert!(asleep.devices[0].connected);
+        assert_eq!(asleep.devices[0].battery, Some(80.0));
+        assert_eq!(asleep.devices[0].charging, Some(true));
+
+        let charging_unknown = service.refresh();
+        assert!(charging_unknown.devices[0].connected);
+        assert_eq!(charging_unknown.devices[0].battery, Some(79.0));
+        assert_eq!(charging_unknown.devices[0].charging, None);
+        assert_eq!(charging_unknown.consecutive_transport_failures, 0);
+        assert!(
+            !charging_unknown
+                .events
+                .iter()
+                .any(|event| matches!(event, DeviceEvent::Disconnected { .. }))
+        );
+    }
+
+    #[test]
     fn session_poll_telemetry_counts_successes_failures_and_recovery() {
         let transport = ScriptedTransport::new(vec![
             Ok(vec![mouse_reading(78.0)]),
