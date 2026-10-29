@@ -16,7 +16,7 @@ Validated on a DeathAdder V3 Pro receiver (`1532:00B7`) in October 2026, see iss
 ## Known limitations
 
 - **Synapse coexistence is unverified.** The test machine has no Razer Synapse installed. The chosen collection is a Generic Desktop Mouse top-level collection, which Windows documents as system-exclusive, so sharing it with Synapse is not guaranteed. The transport mitigates this by opening the handle only for a single query and polling no more often than every 60 seconds. This is recorded as a known limitation for v1.0, not a release blocker; it becomes a blocker only if a user with Synapse reports conflicts.
-- **One device model at a time.** The transport currently matches a single product ID and interface/usage combination. Generalising to the wired twin (`00B6`) and other database entries is #18 and later work; it does not change the transport mechanism.
+- **One device model at a time.** The transport currently matches a single device model (the DeathAdder V3 Pro) and one interface/usage combination. Since #18 the model's wired and wireless product IDs (`00B6` / `00B7`) are read as one logical device through the device database's `pairing` annotation, with the wired twin preferred when both are enumerated; the cable path is still awaiting its hardware check. Generalising to other database entries is later work; neither changes the transport mechanism.
 - **Minimum poll interval of 60 s** is a property of this transport (handle open/close per query, 500 ms reply wait), not of the core.
 
 ## Considered options

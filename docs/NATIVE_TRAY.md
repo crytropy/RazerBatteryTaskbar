@@ -72,7 +72,7 @@ Runtime verification (October 2026, DeathAdder V3 Pro, HID transport enabled wit
 
 1. Collect HID Probe reports from real Razer hardware while Synapse is running.
 2. Validate Synapse coexistence with the default HID transport (known limitation in ADR-0001).
-3. Generalise the transport beyond the `00B7` receiver (#18).
+3. Generalise the transport beyond the DeathAdder V3 Pro (further database entries).
 4. Add a primary-device selection menu when real devices are available.
 
 
@@ -132,20 +132,21 @@ slightly dimmed, so "charging, level unknown" is still distinct from
 to the non-charging icon described above.
 
 The tooltip and the status menu item append ` — Charging` to the existing
-status string, for example `Razer Deathadder V3 Pro Wireless — 64.0% — Charging`
-or `Razer Deathadder V3 Pro Wireless — Battery unavailable — Charging`.
+status string, for example `Razer DeathAdder V3 Pro — 64.0% — Charging`
+or `Razer DeathAdder V3 Pro — Battery unavailable — Charging`.
 Charging-state changes never trigger low-battery notifications
 (see [SETTINGS.md](SETTINGS.md)). The tray never parses the Razer
 protocol: it only renders the `charging` field of the frontend snapshot,
 which the Windows HID transport fills from a second feature query per poll
 (see [TRANSPORT.md](TRANSPORT.md)).
 
-Known limitation: a DeathAdder V3 Pro charging over its cable enumerates as
-the wired product ID `00B6`, which the transport does not read yet
-(ticket #18). Until then, plugging the cable in makes the wireless PID
-`00B7` disappear from enumeration, so the tray reports the mouse as
-disconnected rather than charging; the charging mark can only appear while
-the device is still enumerated as `00B7`.
+A DeathAdder V3 Pro charging over its cable enumerates as the wired product
+ID `00B6`. Since #18 the transport reads that twin as the same device as the
+receiver `00B7` (database pairing, see [TRANSPORT.md](TRANSPORT.md)): the
+status line keeps the base model name `Razer DeathAdder V3 Pro`, the device
+stays connected while the cable goes in or out, and the charging mark appears
+in the most common charging situation, the cable. The plug / unplug behaviour
+still has to be confirmed on hardware (ticket #18).
 
 The worker is tested with a fake transport, without touching real hardware.
 Long-term HID reliability, physical reconnect behavior, and Windows sleep
@@ -154,11 +155,14 @@ recovery still require real-device validation.
 ## Default Windows HID transport (`windows-hid`)
 
 The native tray starts with the Windows HID feature-report transport chosen
-in ADR-0001. It currently matches one receiver, the DeathAdder V3 Pro
-`VID=1532 PID=00B7`, `MI_00`, usage page `0001`, usage `0002`; generalising
-to other database entries is #18. Hot-plug, Windows sleep/wake, idle-mouse
-wake and a 16.5 h polling run were validated on that receiver in October
-2026 (`docs/TRANSPORT.md`). Synapse coexistence is unverified.
+in ADR-0001. It currently matches one device model, the DeathAdder V3 Pro,
+over its receiver `VID=1532 PID=00B7` or its USB cable `PID=00B6`, on
+`MI_00`, usage page `0001`, usage `0002`; both product IDs are shown as the
+one device `Razer DeathAdder V3 Pro`. Generalising to other database entries
+is later work. Hot-plug, Windows sleep/wake, idle-mouse wake and a 16.5 h
+polling run were validated on the receiver in October 2026
+(`docs/TRANSPORT.md`); the cable path awaits its hardware check (#18).
+Synapse coexistence is unverified.
 
 Start it from PowerShell with no arguments:
 
