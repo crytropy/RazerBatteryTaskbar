@@ -23,14 +23,14 @@ Seelen Fancy Toolbar remoteData → JSON.parse inside the plugin scripts
 
 The plugin fetches the **cached status API every 5 seconds**. This does **not**
 trigger an HID query every 5 seconds: the native app retains its configured
-polling interval (at least 60 seconds for experimental 00B7 mode), plus the
+polling interval (at least 60 seconds), plus the
 existing resume-triggered recovery polls.
 
 ## Local setup and verification
 
-1. Run `RazerBatteryTaskbar-Native-Preview.exe --experimental-hid-00b7` on a
+1. Run `RazerBatteryTaskbar-Native-<version>.exe` (no arguments) on a
    supported DeathAdder V3 Pro 1532:00B7 receiver. Start the native EXE only
-   once. The default mode (no flag) still uses a placeholder transport.
+   once. The Windows HID transport is the default.
 2. Confirm the read-only API works from PowerShell:
 
    ```powershell
@@ -76,7 +76,7 @@ below 20%.
 | HID read failed / `battery: null` | `Razer ?%` | Temporary failure and auto-retry |
 | Missing/invalid battery response | `Razer ?%` | Battery unavailable |
 | Missing receiver, service, or incompatible schema | `Razer --` | No device / unavailable |
-| Placeholder HID transport | `Razer --` | HID transport pending |
+| Placeholder transport (`--placeholder-transport` debug run) | `Razer --` | HID transport pending |
 
 Only validated, healthy numeric readings are displayed. After a temporary
 `invalidResponse` error (such as immediately after Windows resumes from
@@ -84,7 +84,7 @@ sleep), the toolbar does **not** treat a missing battery as 0% or show a stale
 percentage. The next successful native poll restores the battery display.
 
 The tooltip lists all connected Razer devices and distinguishes query failure
-from physical disconnection. The experimental native transport is still limited
+from physical disconnection. The native transport is still limited
 to the tested receiver model, not every Razer product listed in the database.
 
 ## If the native tray icon is missing in Seelen UI

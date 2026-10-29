@@ -2,7 +2,9 @@ use serde::Serialize;
 
 use crate::frontend::{FrontendDeviceState, FrontendSnapshot, PollStatistics};
 
-pub const INTEGRATION_SCHEMA_VERSION: u32 = 1;
+/// Version 2: `pollStatistics.deviceNotResponding` was added and `failures`
+/// stopped counting those reads (a semantic change, see docs/INTEGRATION.md).
+pub const INTEGRATION_SCHEMA_VERSION: u32 = 2;
 pub const INTEGRATION_SERVICE_NAME: &str = "RazerBatteryTaskbar";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -106,6 +108,7 @@ mod tests {
                 attempts: 10,
                 successes: 9,
                 failures: 1,
+                device_not_responding: 2,
                 last_duration_ms: Some(500),
                 ..PollStatistics::default()
             },
@@ -115,12 +118,14 @@ mod tests {
             .to_json()
             .unwrap();
 
-        assert!(json.contains(r#""schemaVersion":1"#));
+        assert_eq!(INTEGRATION_SCHEMA_VERSION, 2);
+        assert!(json.contains(r#""schemaVersion":2"#));
         assert!(json.contains(r#""service":"RazerBatteryTaskbar""#));
         assert!(json.contains(r#""transportName":"scripted""#));
         assert!(json.contains(r#""transportReady":true"#));
         assert!(json.contains(r#""transportErrorKind":null"#));
         assert!(json.contains(r#""pollStatistics":{"attempts":10"#));
+        assert!(json.contains(r#""failures":1,"deviceNotResponding":2"#));
         assert!(json.contains(r#""lastDurationMs":500"#));
         assert!(json.contains(r#""deviceType":"mouse""#));
         assert!(json.contains(r#""productId":171"#));

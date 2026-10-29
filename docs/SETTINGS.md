@@ -9,7 +9,7 @@ The default per-user settings location is resolved with `directories::ProjectDir
 Current settings:
 
 - poll interval;
-- primary-device preference (`Auto` or a preferred Razer product ID);
+- primary-device preference (`Auto` or a preferred Razer product ID), stored as `"primaryDevice": "auto"` or `"primaryDevice": { "productId": 183 }` (the decimal product ID, `0x00B7` here);
 - notifications enabled/disabled;
 - low-battery threshold;
 - critical-battery threshold;
@@ -48,11 +48,10 @@ The Windows tray exposes a Settings submenu for the commonly changed values.
 
 Polling interval choices:
 
-- 5 seconds;
-- 15 seconds;
-- 30 seconds;
 - 1 minute;
 - 5 minutes.
+
+The 60-second floor is a property of the Windows HID transport (ADR-0001), so the tray never offers shorter intervals. The core itself still accepts 5–3600 seconds in `settings.json`; a saved value below 60 is raised to 60 by the tray at startup and written back.
 
 Changing the polling interval updates the running scheduler immediately and triggers a refresh. Restarting the application is not required.
 
@@ -61,5 +60,9 @@ Low-battery threshold choices are 10%, 15%, 20%, 25%, and 30%.
 Critical-battery threshold choices are 5%, 10%, 15%, and 20%. Critical values above the current low-battery threshold are disabled. If the low threshold is lowered below the current critical threshold, the critical threshold is clamped down to the new low threshold so the persisted settings remain valid.
 
 The Settings submenu also contains Notifications and Start with Windows toggles.
+
+## Native tray primary-device menu
+
+The `Primary device` submenu of the right-click menu writes the primary-device preference. `Automatic` stores `"auto"`; choosing a listed device stores its product ID. The change is applied to the running core immediately and persists across restarts. When the preferred product is not connected the core falls back to automatic selection without changing the saved preference, so the device is shown again when it reconnects. The list of devices offered by the menu comes from the latest core snapshot, not from the settings file; see [NATIVE_TRAY.md](NATIVE_TRAY.md).
 
 Values outside the menu presets can still exist in the JSON settings file as long as they satisfy core validation. In that case no preset is checked until a menu preset is selected.

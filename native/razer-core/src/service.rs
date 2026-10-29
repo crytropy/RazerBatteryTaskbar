@@ -77,7 +77,12 @@ impl<T: BatteryTransport> CoreService<T> {
                 (self.manager.update_from_readings(readings), None)
             }
             Err(error) => {
-                self.poll_statistics.failures = self.poll_statistics.failures.saturating_add(1);
+                let counter = if error.kind == TransportErrorKind::DeviceNotResponding {
+                    &mut self.poll_statistics.device_not_responding
+                } else {
+                    &mut self.poll_statistics.failures
+                };
+                *counter = counter.saturating_add(1);
                 self.consecutive_transport_failures += 1;
                 let message = error.to_string();
                 self.last_transport_error = Some(message.clone());
@@ -439,6 +444,46 @@ mod tests {
     }
 
     #[test]
+    fn sleeping_device_keeps_last_charging_state_like_battery() {
+        let charging_mouse = DeviceReading {
+            charging: Some(true),
+            ..mouse_reading(80.0)
+        };
+        let transport = ScriptedTransport::new(vec![
+            Ok(vec![charging_mouse]),
+            Err(TransportError::with_kind(
+                TransportErrorKind::DeviceNotResponding,
+                "Razer status 0x03 (failure)",
+            )),
+            // Battery answered but the charging query failed: charging is
+            // unknown, the battery is updated and the device stays connected.
+            Ok(vec![mouse_reading(79.0)]),
+        ]);
+        let mut service = CoreService::new(transport);
+
+        let connected = service.refresh();
+        assert_eq!(connected.devices[0].charging, Some(true));
+
+        let asleep = service.refresh();
+        assert!(asleep.events.is_empty());
+        assert!(asleep.devices[0].connected);
+        assert_eq!(asleep.devices[0].battery, Some(80.0));
+        assert_eq!(asleep.devices[0].charging, Some(true));
+
+        let charging_unknown = service.refresh();
+        assert!(charging_unknown.devices[0].connected);
+        assert_eq!(charging_unknown.devices[0].battery, Some(79.0));
+        assert_eq!(charging_unknown.devices[0].charging, None);
+        assert_eq!(charging_unknown.consecutive_transport_failures, 0);
+        assert!(
+            !charging_unknown
+                .events
+                .iter()
+                .any(|event| matches!(event, DeviceEvent::Disconnected { .. }))
+        );
+    }
+
+    #[test]
     fn session_poll_telemetry_counts_successes_failures_and_recovery() {
         let transport = ScriptedTransport::new(vec![
             Ok(vec![mouse_reading(78.0)]),
@@ -479,6 +524,57 @@ mod tests {
         assert_eq!(
             recovered.last_battery_read_unix_ms,
             first.last_battery_read_unix_ms
+        );
+    }
+
+    #[test]
+    fn device_not_responding_is_counted_apart_from_transport_failures() {
+        let sleeping = || {
+            Err(TransportError::with_kind(
+                TransportErrorKind::DeviceNotResponding,
+                "Razer status 0x04 (timeout)",
+            ))
+        };
+        let transport = ScriptedTransport::new(vec![
+            Ok(vec![mouse_reading(78.0)]),
+            sleeping(),
+            sleeping(),
+            Err(TransportError::with_kind(
+                TransportErrorKind::Receive,
+                "simulated read failure",
+            )),
+            Err(TransportError::with_kind(
+                TransportErrorKind::InvalidResponse,
+                "simulated bad reply",
+            )),
+            sleeping(),
+            Ok(vec![mouse_reading(77.0)]),
+        ]);
+        let mut service = CoreService::new(transport);
+
+        let mut observed = Vec::new();
+        for _ in 0..7 {
+            service.refresh();
+            let stats = service.frontend_snapshot().poll_statistics;
+            assert_eq!(
+                stats.attempts,
+                stats.successes + stats.failures + stats.device_not_responding,
+                "attempts must equal successes + failures + deviceNotResponding"
+            );
+            observed.push((stats.successes, stats.failures, stats.device_not_responding));
+        }
+
+        assert_eq!(
+            observed,
+            vec![
+                (1, 0, 0),
+                (1, 0, 1),
+                (1, 0, 2),
+                (1, 1, 2),
+                (1, 2, 2),
+                (1, 2, 3),
+                (2, 2, 3),
+            ]
         );
     }
 

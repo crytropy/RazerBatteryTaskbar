@@ -25,7 +25,7 @@ UI/integration code should consume `CoreService::frontend_snapshot()` rather tha
 
 `CoreService<T: BatteryTransport>` owns the transport and device manager. A frontend only needs to request a refresh and consume snapshots/events.
 
-Transport readiness and transport health are separate concepts. `BatteryTransport::is_ready()` reports whether a real battery transport is available for use, while health tracks recent read failures. The Native Preview placeholder therefore reports `ready=false` without pretending that an implemented HID transport failed.
+Transport readiness and transport health are separate concepts. `BatteryTransport::is_ready()` reports whether a real battery transport is available for use, while health tracks recent read failures. The native tray placeholder therefore reports `ready=false` without pretending that an implemented HID transport failed.
 
 Transport-wide failures preserve the last connected state for the first two failures. On the third consecutive failure, known connected devices transition to disconnected. A later successful scan resets the transport health counter.
 
@@ -43,4 +43,4 @@ The Rust core intentionally preserves the behavior already established by the Ja
 
 ## Windows transport status
 
-The real Windows HID battery transport has been validated on hardware (DeathAdder V3 Pro receiver, October 2026) and is the core's chosen production transport; see `docs/adr/0001-windows-hid-feature-reports-as-rust-core-transport.md`. It is still behind the `--experimental-hid-00b7` opt-in until #8 makes it the default. Synapse coexistence remains unverified and is tracked as a known limitation rather than a core blocker.
+The real Windows HID battery transport has been validated on hardware (DeathAdder V3 Pro receiver, October 2026) and is the core's chosen production transport; see `docs/adr/0001-windows-hid-feature-reports-as-rust-core-transport.md`. Since #8 it is the native tray's default transport, reported as `windows-hid`. Synapse coexistence remains unverified and is tracked as a known limitation rather than a core blocker.

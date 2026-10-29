@@ -183,6 +183,35 @@ mod tests {
     }
 
     #[test]
+    fn charging_state_changes_never_produce_low_battery_notifications() {
+        let mut previous = state(Some(8.0));
+        previous.charging = Some(false);
+        let mut current = state(Some(8.0));
+        current.charging = Some(true);
+
+        assert_eq!(
+            evaluate_event(
+                &DeviceEvent::ChargingChanged {
+                    previous: previous.clone(),
+                    current: current.clone(),
+                },
+                &NotificationSettings::default(),
+            ),
+            None
+        );
+        assert_eq!(
+            evaluate_event(
+                &DeviceEvent::ChargingChanged {
+                    previous: current,
+                    current: previous
+                },
+                &NotificationSettings::default(),
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn disabled_notifications_produce_no_requests() {
         let settings = NotificationSettings {
             enabled: false,

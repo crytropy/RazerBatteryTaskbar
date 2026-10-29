@@ -1,31 +1,38 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;
+#[cfg(windows)]
+mod device_events;
 mod polling;
 #[cfg(windows)]
 mod power_events;
+mod primary_device_menu;
+mod resume_recovery;
 mod settings_menu;
 mod startup;
 
 use std::error::Error;
-use std::thread;
 use std::time::Duration;
 
 use api::SharedIntegrationState;
+#[cfg(windows)]
+use device_events::DeviceChangeNotifications;
 use notify_rust::{Notification, Urgency};
 use polling::{CoreUpdate, CoreWorker};
 #[cfg(windows)]
 use power_events::PowerNotifications;
+use primary_device_menu::{PrimaryDeviceMenu, canonical_preference};
 use razer_core::frontend::FrontendSnapshot;
 #[cfg(test)]
 use razer_core::frontend::PollStatistics;
 use razer_core::notifications::{NotificationKind, NotificationRequest};
-use razer_core::settings::{AppSettings, SettingsStore};
+use razer_core::settings::{AppSettings, PrimaryDevicePreference, SettingsStore};
 use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
 #[cfg(windows)]
-use razer_core::windows_hid::ExperimentalDeathAdderTransport;
-use settings_menu::SettingsMenu;
+use razer_core::windows_hid::WindowsHidTransport;
+use resume_recovery::{RecoveryOutcome, RecoveryTick, ResumeRecovery};
+use settings_menu::{MIN_POLL_INTERVAL_SECONDS, SettingsMenu};
 use single_instance::SingleInstance;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -35,13 +42,17 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::WindowId;
 
 const INSTANCE_NAME: &str = "RazerBatteryTaskbar.Native.Tray";
-const MIN_EXPERIMENTAL_POLL_SECONDS: u64 = 60;
 
 #[derive(Debug)]
 enum UserEvent {
     Menu(MenuEvent),
     Core(CoreUpdate),
-    PowerResume,
+    /// Windows resumed; the payload is the recovery generation for this wake.
+    PowerResume(u64),
+    /// A scheduled post-resume recovery refresh is due.
+    RecoveryTick(RecoveryTick),
+    /// A debounced USB/HID device arrival or removal asks for a rescan.
+    DeviceChange,
 }
 
 struct PlaceholderTransport;
@@ -63,7 +74,7 @@ impl BatteryTransport for PlaceholderTransport {
 enum AppTransport {
     Placeholder(PlaceholderTransport),
     #[cfg(windows)]
-    Experimental(ExperimentalDeathAdderTransport),
+    WindowsHid(WindowsHidTransport),
 }
 
 impl BatteryTransport for AppTransport {
@@ -71,7 +82,7 @@ impl BatteryTransport for AppTransport {
         match self {
             Self::Placeholder(transport) => transport.name(),
             #[cfg(windows)]
-            Self::Experimental(transport) => transport.name(),
+            Self::WindowsHid(transport) => transport.name(),
         }
     }
 
@@ -79,7 +90,7 @@ impl BatteryTransport for AppTransport {
         match self {
             Self::Placeholder(transport) => transport.is_ready(),
             #[cfg(windows)]
-            Self::Experimental(transport) => transport.is_ready(),
+            Self::WindowsHid(transport) => transport.is_ready(),
         }
     }
 
@@ -87,20 +98,103 @@ impl BatteryTransport for AppTransport {
         match self {
             Self::Placeholder(transport) => transport.read_devices(),
             #[cfg(windows)]
-            Self::Experimental(transport) => transport.read_devices(),
+            Self::WindowsHid(transport) => transport.read_devices(),
         }
     }
 }
 
+/// Which battery transport the tray starts with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransportChoice {
+    /// Native Windows HID feature reports (ADR-0001). The default.
+    WindowsHid,
+    /// Reads nothing and reports `ready=false`; debug/test runs without hardware only.
+    Placeholder,
+}
+
+impl TransportChoice {
+    fn into_transport(self) -> Result<AppTransport, Box<dyn Error>> {
+        match self {
+            Self::Placeholder => Ok(AppTransport::Placeholder(PlaceholderTransport)),
+            #[cfg(windows)]
+            Self::WindowsHid => Ok(AppTransport::WindowsHid(WindowsHidTransport::new())),
+            #[cfg(not(windows))]
+            Self::WindowsHid => Err("the Windows HID transport requires Windows".into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchOptions {
+    Run(TransportChoice),
+    Help,
+}
+
+use startup::LEGACY_HID_FLAG;
+const PLACEHOLDER_FLAG: &str = "--placeholder-transport";
+
+fn parse_launch_options(args: &[String]) -> Result<LaunchOptions, String> {
+    match args {
+        [] => Ok(LaunchOptions::Run(TransportChoice::WindowsHid)),
+        [option] if option == LEGACY_HID_FLAG => {
+            // Release builds use windows_subsystem = "windows", so this notice
+            // has no console to land in; it is visible only in debug runs and
+            // when stderr is redirected. The flag is accepted either way.
+            eprintln!(
+                "{LEGACY_HID_FLAG} is a no-op: the Windows HID transport is already the default."
+            );
+            Ok(LaunchOptions::Run(TransportChoice::WindowsHid))
+        }
+        [option] if option == PLACEHOLDER_FLAG => {
+            Ok(LaunchOptions::Run(TransportChoice::Placeholder))
+        }
+        [option] if option == "--help" || option == "-h" => Ok(LaunchOptions::Help),
+        _ => Err("invalid arguments: use --help to see supported options".to_string()),
+    }
+}
+
+fn print_help() {
+    println!("RazerBatteryTaskbar Native");
+    println!("Usage: razer-tray.exe [{PLACEHOLDER_FLAG}]");
+    println!("Starts with the native Windows HID battery transport by default.");
+    println!("  {PLACEHOLDER_FLAG}   debug only: run without any battery transport");
+    println!("  {LEGACY_HID_FLAG}  retired; accepted as a no-op");
+}
+
+/// Resolve a saved primary-device preference to the canonical product ID the
+/// core reports (the wired twin `00B6` becomes `00B7`). Returns `true` when
+/// the settings were changed.
+fn canonicalize_primary_device(settings: &mut AppSettings) -> bool {
+    let canonical = canonical_preference(&settings.primary_device);
+    if canonical == settings.primary_device {
+        return false;
+    }
+
+    settings.primary_device = canonical;
+    true
+}
+
+/// Raise a saved poll interval to the Windows HID transport's minimum.
+/// Returns `true` when the settings were changed.
+fn clamp_poll_interval(settings: &mut AppSettings) -> bool {
+    if settings.poll_interval_seconds < MIN_POLL_INTERVAL_SECONDS {
+        settings.poll_interval_seconds = MIN_POLL_INTERVAL_SECONDS;
+        return true;
+    }
+
+    false
+}
+
 struct TrayApplication {
     worker: CoreWorker,
-    experimental_hid: bool,
     settings_store: Option<SettingsStore>,
     settings: AppSettings,
     integration_state: SharedIntegrationState,
     last_snapshot: Option<FrontendSnapshot>,
+    resume_recovery: ResumeRecovery,
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
+    primary_device_menu: Option<PrimaryDeviceMenu>,
     settings_menu: Option<SettingsMenu>,
     refresh_item: Option<MenuItem>,
     quit_item: Option<MenuItem>,
@@ -112,17 +206,17 @@ impl TrayApplication {
         settings: AppSettings,
         integration_state: SharedIntegrationState,
         worker: CoreWorker,
-        experimental_hid: bool,
     ) -> Self {
         Self {
             worker,
-            experimental_hid,
             settings_store,
             settings,
             integration_state,
             last_snapshot: None,
+            resume_recovery: ResumeRecovery::default(),
             tray: None,
             status_item: None,
+            primary_device_menu: None,
             settings_menu: None,
             refresh_item: None,
             quit_item: None,
@@ -132,23 +226,26 @@ impl TrayApplication {
     fn create_tray(&mut self) -> Result<(), Box<dyn Error>> {
         let menu = Menu::new();
         let status_item = MenuItem::new("Starting native core…", false, None);
-        let settings_menu = SettingsMenu::new(&self.settings, self.experimental_hid)?;
+        let primary_device_menu = PrimaryDeviceMenu::new(&self.settings.primary_device)?;
+        let settings_menu = SettingsMenu::new(&self.settings)?;
         let refresh_item = MenuItem::with_id("refresh", "Refresh", true, None);
         let quit_item = MenuItem::with_id("quit", "Quit", true, None);
 
         menu.append(&status_item)?;
+        menu.append(&primary_device_menu.root)?;
         menu.append(&settings_menu.root)?;
         menu.append(&refresh_item)?;
         menu.append(&quit_item)?;
 
         let tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_icon(build_battery_icon(None)?)
+            .with_icon(build_battery_icon(None, false)?)
             .with_tooltip("RazerBatteryTaskbar Native")
             .build()?;
 
         self.tray = Some(tray);
         self.status_item = Some(status_item);
+        self.primary_device_menu = Some(primary_device_menu);
         self.settings_menu = Some(settings_menu);
         self.refresh_item = Some(refresh_item);
         self.quit_item = Some(quit_item);
@@ -156,6 +253,7 @@ impl TrayApplication {
         if let Some(snapshot) = &self.last_snapshot {
             self.render(snapshot);
         }
+        self.sync_primary_device_menu();
 
         Ok(())
     }
@@ -177,6 +275,7 @@ impl TrayApplication {
 
         self.render(&update.snapshot);
         self.last_snapshot = Some(update.snapshot);
+        self.sync_primary_device_menu();
     }
 
     fn render(&self, snapshot: &FrontendSnapshot) {
@@ -188,16 +287,17 @@ impl TrayApplication {
 
         if let Some(tray) = &self.tray {
             let _ = tray.set_tooltip(Some(&status));
-            let battery = if snapshot.transport_healthy && snapshot.transport_ready {
-                snapshot
-                    .primary_device
-                    .as_ref()
-                    .and_then(|device| device.battery)
+            let (battery, charging) = if snapshot.transport_healthy && snapshot.transport_ready {
+                let device = snapshot.primary_device.as_ref();
+                (
+                    device.and_then(|device| device.battery),
+                    device.and_then(|device| device.charging) == Some(true),
+                )
             } else {
-                None
+                (None, false)
             };
             let _ = tray.set_icon(Some(
-                build_battery_icon(battery).expect("generated tray icon must be valid"),
+                build_battery_icon(battery, charging).expect("generated tray icon must be valid"),
             ));
         }
     }
@@ -214,6 +314,23 @@ impl TrayApplication {
         if let Some(menu) = &self.settings_menu {
             menu.sync(&self.settings);
         }
+    }
+
+    fn sync_primary_device_menu(&mut self) {
+        if let Some(menu) = &mut self.primary_device_menu {
+            menu.update(self.last_snapshot.as_ref(), &self.settings.primary_device);
+        }
+    }
+
+    /// The core answers with a snapshot for the new primary device; the icon,
+    /// tooltip and `/v1/status` all follow from that same snapshot.
+    fn set_primary_device(&mut self, preference: PrimaryDevicePreference) {
+        self.settings.primary_device = preference.clone();
+        if !self.worker.set_primary_device(preference) {
+            eprintln!("battery worker could not update the primary device");
+        }
+        self.sync_primary_device_menu();
+        self.persist_settings("primary device");
     }
 
     fn sync_worker_notifications(&self) {
@@ -233,7 +350,7 @@ impl TrayApplication {
     }
 
     fn set_poll_interval(&mut self, seconds: u64) {
-        if self.experimental_hid && seconds < MIN_EXPERIMENTAL_POLL_SECONDS {
+        if seconds < MIN_POLL_INTERVAL_SECONDS {
             return;
         }
 
@@ -272,7 +389,7 @@ impl TrayApplication {
     fn toggle_start_with_windows(&mut self) {
         let next = !self.settings.start_with_windows;
 
-        match startup::set_enabled(next, self.experimental_hid) {
+        match startup::set_enabled(next) {
             Ok(()) => {
                 self.settings.start_with_windows = next;
                 self.sync_settings_menu();
@@ -286,6 +403,15 @@ impl TrayApplication {
     }
 
     fn handle_menu(&mut self, event_loop: &ActiveEventLoop, event: MenuEvent) {
+        let primary_device = self
+            .primary_device_menu
+            .as_ref()
+            .and_then(|menu| menu.preference_for_event(&event));
+        if let Some(preference) = primary_device {
+            self.set_primary_device(preference);
+            return;
+        }
+
         let notifications_event = self
             .settings_menu
             .as_ref()
@@ -370,8 +496,19 @@ impl ApplicationHandler<UserEvent> for TrayApplication {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Menu(event) => self.handle_menu(event_loop, event),
-            UserEvent::Core(update) => self.apply_core_update(update),
-            UserEvent::PowerResume => self.refresh(),
+            UserEvent::Core(update) => {
+                if self.resume_recovery.on_update(&update.snapshot) == RecoveryOutcome::Exhausted {
+                    eprintln!("post-resume recovery refreshes failed; regular polling continues");
+                }
+                self.apply_core_update(update);
+            }
+            UserEvent::PowerResume(generation) => self.resume_recovery.on_resume(generation),
+            UserEvent::RecoveryTick(tick) => {
+                if self.resume_recovery.on_tick(tick) {
+                    self.refresh();
+                }
+            }
+            UserEvent::DeviceChange => self.refresh(),
         }
     }
 
@@ -402,22 +539,25 @@ fn load_settings() -> (Option<SettingsStore>, AppSettings) {
     }
 }
 
-fn reconcile_startup_setting(
-    store: Option<&SettingsStore>,
-    settings: &mut AppSettings,
-    experimental_hid: bool,
-) {
-    match startup::is_enabled(experimental_hid) {
-        Ok(enabled) if enabled != settings.start_with_windows => {
-            settings.start_with_windows = enabled;
+fn reconcile_startup_setting(store: Option<&SettingsStore>, settings: &mut AppSettings) {
+    match startup::is_enabled() {
+        Ok(enabled) => {
+            if enabled != settings.start_with_windows {
+                settings.start_with_windows = enabled;
 
-            if let Some(store) = store
-                && let Err(error) = store.save(settings)
-            {
-                eprintln!("failed to reconcile start-with-Windows setting: {error}");
+                if let Some(store) = store
+                    && let Err(error) = store.save(settings)
+                {
+                    eprintln!("failed to reconcile start-with-Windows setting: {error}");
+                }
+            }
+
+            // A Run entry left by a preview still carries the retired flag;
+            // rewrite it to the plain path now rather than on a later toggle.
+            if enabled && let Err(error) = startup::migrate_legacy_entry() {
+                eprintln!("failed to rewrite the legacy start-with-Windows entry: {error}");
             }
         }
-        Ok(_) => {}
         Err(error) => {
             eprintln!("failed to read start-with-Windows registration: {error}");
         }
@@ -453,7 +593,7 @@ fn deliver_test_notification() {
 
 fn format_status(snapshot: &FrontendSnapshot) -> String {
     if !snapshot.transport_ready {
-        return "Native shell ready — HID transport pending".to_string();
+        return "Placeholder transport (debug) — no battery data".to_string();
     }
 
     if !snapshot.transport_healthy {
@@ -468,28 +608,49 @@ fn format_status(snapshot: &FrontendSnapshot) -> String {
     }
 
     match snapshot.primary_device.as_ref() {
-        Some(device) if device.connected => match device.battery {
-            Some(battery) => format!(
-                "{} — {battery:.1}%",
-                device.name.as_deref().unwrap_or("Razer device")
-            ),
-            None => format!(
-                "{} — Battery unavailable",
-                device.name.as_deref().unwrap_or("Razer device")
-            ),
-        },
+        Some(device) if device.connected => {
+            let name = device.name.as_deref().unwrap_or("Razer device");
+            let charging = if device.charging == Some(true) {
+                " — Charging"
+            } else {
+                ""
+            };
+            match device.battery {
+                Some(battery) => format!("{name} — {battery:.1}%{charging}"),
+                None => format!("{name} — Battery unavailable{charging}"),
+            }
+        }
         _ => "No supported Razer devices detected".to_string(),
     }
 }
 
-fn build_battery_icon(battery: Option<f32>) -> Result<Icon, tray_icon::BadIcon> {
+fn build_battery_icon(battery: Option<f32>, charging: bool) -> Result<Icon, tray_icon::BadIcon> {
     const WIDTH: u32 = 16;
     const HEIGHT: u32 = 16;
 
-    Icon::from_rgba(battery_icon_rgba(battery), WIDTH, HEIGHT)
+    Icon::from_rgba(battery_icon_rgba(battery, charging), WIDTH, HEIGHT)
 }
 
-fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
+/// Lightning bolt drawn inside the battery cell while charging, as
+/// (x, y) pixels. It spans the interior rows 5..=10 and columns 5..=8.
+const CHARGING_BOLT_PIXELS: [(u32, u32); 14] = [
+    (7, 5),
+    (8, 5),
+    (6, 6),
+    (7, 6),
+    (5, 7),
+    (6, 7),
+    (7, 7),
+    (8, 7),
+    (7, 8),
+    (8, 8),
+    (6, 9),
+    (7, 9),
+    (5, 10),
+    (6, 10),
+];
+
+fn battery_icon_rgba(battery: Option<f32>, charging: bool) -> Vec<u8> {
     const WIDTH: u32 = 16;
     const HEIGHT: u32 = 16;
 
@@ -529,6 +690,9 @@ fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
                 }
             }
         }
+        // While charging the bolt replaces the unknown marker; a dimmed bolt
+        // in an empty cell is the charging-with-unknown-battery state.
+        None if charging => {}
         None => {
             // Unknown is not zero: draw a small question mark inside the empty cell.
             for (x, y) in [
@@ -546,22 +710,27 @@ fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
         }
     }
 
+    if charging {
+        // Invert the bolt against whatever is underneath so it stays legible
+        // over the white fill as well as over the empty (transparent) cell.
+        let unfilled_value = if battery.is_some() { 255 } else { 200 };
+        for (x, y) in CHARGING_BOLT_PIXELS {
+            let filled = fill_width.is_some_and(|fill_width| x < 3 + fill_width);
+            set_pixel(x, y, if filled { 0 } else { unfilled_value });
+        }
+    }
+
     rgba
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let experimental_hid = match args.as_slice() {
-        [] => false,
-        [option] if option == "--experimental-hid-00b7" => true,
-        [option] if option == "--help" || option == "-h" => {
-            println!("RazerBatteryTaskbar Native Preview");
-            println!("Usage: razer-tray.exe [--experimental-hid-00b7]");
-            println!("Experimental HID mode is for DeathAdder V3 Pro receiver 1532:00B7 only.");
-            println!("Close Razer Synapse for the initial repeated-read test.");
+    let transport_choice = match parse_launch_options(&args)? {
+        LaunchOptions::Run(choice) => choice,
+        LaunchOptions::Help => {
+            print_help();
             return Ok(());
         }
-        _ => return Err("invalid arguments: use --help to see supported options".into()),
     };
 
     let instance_guard = SingleInstance::new(INSTANCE_NAME)?;
@@ -571,31 +740,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let (settings_store, mut settings) = load_settings();
-    reconcile_startup_setting(settings_store.as_ref(), &mut settings, experimental_hid);
+    reconcile_startup_setting(settings_store.as_ref(), &mut settings);
 
-    // Do not write the experimental minimum into the user's persistent settings.
-    if experimental_hid {
-        settings.poll_interval_seconds = settings
-            .poll_interval_seconds
-            .max(MIN_EXPERIMENTAL_POLL_SECONDS);
+    let clamped = clamp_poll_interval(&mut settings);
+    let canonicalized = canonicalize_primary_device(&mut settings);
+    if (clamped || canonicalized)
+        && let Some(store) = settings_store.as_ref()
+        && let Err(error) = store.save(&settings)
+    {
+        eprintln!("failed to persist normalized settings: {error}");
     }
 
-    let transport = if experimental_hid {
-        #[cfg(windows)]
-        {
-            AppTransport::Experimental(ExperimentalDeathAdderTransport::new())
-        }
-        #[cfg(not(windows))]
-        {
-            return Err("experimental HID transport requires Windows".into());
-        }
-    } else {
-        AppTransport::Placeholder(PlaceholderTransport)
-    };
+    let transport = transport_choice.into_transport()?;
 
     let initial_poll_interval = Duration::from_secs(settings.poll_interval_seconds);
 
-    let integration_state = api::initial_state();
+    let integration_state = api::initial_state(transport.name(), transport.is_ready());
     let _api_thread = match api::start(integration_state.clone()) {
         Ok(thread) => Some(thread),
         Err(error) => {
@@ -611,25 +771,41 @@ fn main() -> Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
 
     // Windows sends an automatic resume event, often followed by a second
-    // user-resume event. The power callback deduplicates the pair.
-    // Retry once after the receiver's USB/HID interface has had time to recover.
+    // user-resume event. The power callback deduplicates the pair. The
+    // receiver needs several seconds to re-pair with the mouse, so recovery
+    // refreshes are staggered (see `resume_recovery`) and stop at the first
+    // real battery read.
     #[cfg(windows)]
     let _power_notifications = {
         let resume_proxy = event_loop.create_proxy();
         match PowerNotifications::register(move || {
-            let _ = resume_proxy.send_event(UserEvent::PowerResume);
+            let generation = resume_recovery::next_generation();
+            let _ = resume_proxy.send_event(UserEvent::PowerResume(generation));
 
-            let retry_proxy = resume_proxy.clone();
-            let _ = thread::Builder::new()
-                .name("razer-resume-retry".to_string())
-                .spawn(move || {
-                    thread::sleep(Duration::from_secs(3));
-                    let _ = retry_proxy.send_event(UserEvent::PowerResume);
-                });
+            let tick_proxy = resume_proxy.clone();
+            resume_recovery::spawn_ticks(generation, move |tick| {
+                let _ = tick_proxy.send_event(UserEvent::RecoveryTick(tick));
+            });
         }) {
             Ok(registration) => Some(registration),
             Err(error) => {
                 eprintln!("Windows resume notification unavailable: {error}");
+                None
+            }
+        }
+    };
+
+    // Unplugging or replugging the receiver produces a burst of HID interface
+    // notifications. The device-change module debounces them into rescans.
+    #[cfg(windows)]
+    let _device_notifications = {
+        let rescan_proxy = event_loop.create_proxy();
+        match DeviceChangeNotifications::register(move || {
+            let _ = rescan_proxy.send_event(UserEvent::DeviceChange);
+        }) {
+            Ok(registration) => Some(registration),
+            Err(error) => {
+                eprintln!("Windows device-change notification unavailable: {error}");
                 None
             }
         }
@@ -649,13 +825,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         move |update| update_proxy.send_event(UserEvent::Core(update)).is_ok(),
     );
 
-    let mut application = TrayApplication::new(
-        settings_store,
-        settings,
-        integration_state,
-        worker,
-        experimental_hid,
-    );
+    let mut application = TrayApplication::new(settings_store, settings, integration_state, worker);
     event_loop.run_app(&mut application)?;
     drop(instance_guard);
 
@@ -665,9 +835,83 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use razer_core::frontend::FrontendDeviceState;
+    use razer_core::state::DeviceType;
+
+    fn healthy_snapshot(battery: Option<f32>, charging: Option<bool>) -> FrontendSnapshot {
+        let device = FrontendDeviceState {
+            vendor_id: 0x1532,
+            product_id: 0x00B7,
+            name: Some("Razer DeathAdder V3 Pro".to_string()),
+            device_type: DeviceType::Mouse,
+            battery,
+            charging,
+            connected: true,
+        };
+        FrontendSnapshot {
+            devices: vec![device.clone()],
+            primary_device: Some(device),
+            transport_name: "windows-hid".to_string(),
+            transport_ready: true,
+            transport_healthy: true,
+            consecutive_transport_failures: 0,
+            transport_error_kind: None,
+            poll_statistics: PollStatistics::default(),
+        }
+    }
 
     #[test]
-    fn native_shell_status_is_explicit_about_pending_hid_transport() {
+    fn status_text_appends_charging_in_the_existing_format() {
+        assert_eq!(
+            format_status(&healthy_snapshot(Some(64.0), Some(true))),
+            "Razer DeathAdder V3 Pro — 64.0% — Charging"
+        );
+        assert_eq!(
+            format_status(&healthy_snapshot(None, Some(true))),
+            "Razer DeathAdder V3 Pro — Battery unavailable — Charging"
+        );
+        assert_eq!(
+            format_status(&healthy_snapshot(Some(64.0), Some(false))),
+            "Razer DeathAdder V3 Pro — 64.0%"
+        );
+        assert_eq!(
+            format_status(&healthy_snapshot(Some(64.0), None)),
+            "Razer DeathAdder V3 Pro — 64.0%"
+        );
+    }
+
+    #[test]
+    fn charging_icon_differs_from_non_charging_icon_at_every_battery_level() {
+        for level in [0.0, 37.0, 50.0, 100.0] {
+            assert!(build_battery_icon(Some(level), true).is_ok());
+            assert_ne!(
+                battery_icon_rgba(Some(level), true),
+                battery_icon_rgba(Some(level), false),
+                "charging mark missing at {level}%"
+            );
+        }
+        // Not charging and unknown charging render the same icon as before.
+        assert_eq!(
+            battery_icon_rgba(Some(50.0), false).len(),
+            (16 * 16 * 4) as usize
+        );
+    }
+
+    #[test]
+    fn charging_icon_renders_with_unknown_battery() {
+        assert!(build_battery_icon(None, true).is_ok());
+        assert_ne!(
+            battery_icon_rgba(None, true),
+            battery_icon_rgba(None, false)
+        );
+        assert_ne!(
+            battery_icon_rgba(None, true),
+            battery_icon_rgba(Some(0.0), true)
+        );
+    }
+
+    #[test]
+    fn placeholder_status_is_explicit_that_no_battery_transport_is_active() {
         let snapshot = FrontendSnapshot {
             devices: Vec::new(),
             primary_device: None,
@@ -681,7 +925,7 @@ mod tests {
 
         assert_eq!(
             format_status(&snapshot),
-            "Native shell ready — HID transport pending"
+            "Placeholder transport (debug) — no battery data"
         );
     }
 
@@ -690,7 +934,7 @@ mod tests {
         let snapshot = FrontendSnapshot {
             devices: Vec::new(),
             primary_device: None,
-            transport_name: "windows-hid-00b7-experimental".to_string(),
+            transport_name: "windows-hid".to_string(),
             transport_ready: true,
             transport_healthy: false,
             consecutive_transport_failures: 2,
@@ -703,20 +947,113 @@ mod tests {
     }
 
     #[test]
+    fn default_launch_selects_the_windows_hid_transport() {
+        let options = parse_launch_options(&[]).unwrap();
+
+        assert_eq!(options, LaunchOptions::Run(TransportChoice::WindowsHid));
+    }
+
+    #[test]
+    fn retired_hid_flag_is_accepted_as_a_no_op() {
+        let options = parse_launch_options(&["--experimental-hid-00b7".to_string()]).unwrap();
+
+        assert_eq!(options, LaunchOptions::Run(TransportChoice::WindowsHid));
+    }
+
+    #[test]
+    fn placeholder_transport_needs_the_explicit_debug_flag() {
+        let options = parse_launch_options(&["--placeholder-transport".to_string()]).unwrap();
+        assert_eq!(options, LaunchOptions::Run(TransportChoice::Placeholder));
+
+        assert_eq!(
+            parse_launch_options(&["--help".to_string()]).unwrap(),
+            LaunchOptions::Help
+        );
+        assert!(parse_launch_options(&["--placeholder".to_string()]).is_err());
+        assert!(
+            parse_launch_options(&[
+                "--placeholder-transport".to_string(),
+                "--experimental-hid-00b7".to_string()
+            ])
+            .is_err()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn default_transport_is_the_ready_windows_hid_implementation() {
+        let transport = TransportChoice::WindowsHid.into_transport().unwrap();
+
+        assert_eq!(transport.name(), "windows-hid");
+        assert!(transport.is_ready());
+    }
+
+    #[test]
+    fn placeholder_transport_is_explicitly_not_ready() {
+        let transport = TransportChoice::Placeholder.into_transport().unwrap();
+
+        assert_eq!(transport.name(), "placeholder");
+        assert!(!transport.is_ready());
+    }
+
+    #[test]
+    fn saved_poll_intervals_below_the_transport_minimum_are_clamped() {
+        let mut settings = AppSettings {
+            poll_interval_seconds: 5,
+            ..AppSettings::default()
+        };
+        assert!(clamp_poll_interval(&mut settings));
+        assert_eq!(settings.poll_interval_seconds, 60);
+
+        let mut settings = AppSettings {
+            poll_interval_seconds: 300,
+            ..AppSettings::default()
+        };
+        assert!(!clamp_poll_interval(&mut settings));
+        assert_eq!(settings.poll_interval_seconds, 300);
+    }
+
+    #[test]
+    fn saved_wired_twin_preference_is_rewritten_to_the_canonical_product_id() {
+        let mut settings = AppSettings {
+            primary_device: PrimaryDevicePreference::ProductId(0x00B6),
+            ..AppSettings::default()
+        };
+        assert!(canonicalize_primary_device(&mut settings));
+        assert_eq!(
+            settings.primary_device,
+            PrimaryDevicePreference::ProductId(0x00B7)
+        );
+
+        assert!(!canonicalize_primary_device(&mut settings));
+        let mut automatic = AppSettings::default();
+        assert!(!canonicalize_primary_device(&mut automatic));
+    }
+
+    #[test]
     fn generated_icons_are_valid_at_extreme_battery_levels() {
-        assert!(build_battery_icon(Some(0.0)).is_ok());
-        assert!(build_battery_icon(Some(100.0)).is_ok());
-        assert!(build_battery_icon(None).is_ok());
+        assert!(build_battery_icon(Some(0.0), false).is_ok());
+        assert!(build_battery_icon(Some(100.0), false).is_ok());
+        assert!(build_battery_icon(None, false).is_ok());
     }
 
     #[test]
     fn unknown_battery_icon_is_distinct_from_empty_battery() {
-        assert_ne!(battery_icon_rgba(None), battery_icon_rgba(Some(0.0)));
-        assert_ne!(battery_icon_rgba(None), battery_icon_rgba(Some(100.0)));
-        assert_eq!(battery_icon_rgba(Some(0.0)), battery_icon_rgba(Some(-10.0)));
+        assert_ne!(
+            battery_icon_rgba(None, false),
+            battery_icon_rgba(Some(0.0), false)
+        );
+        assert_ne!(
+            battery_icon_rgba(None, false),
+            battery_icon_rgba(Some(100.0), false)
+        );
         assert_eq!(
-            battery_icon_rgba(Some(100.0)),
-            battery_icon_rgba(Some(110.0))
+            battery_icon_rgba(Some(0.0), false),
+            battery_icon_rgba(Some(-10.0), false)
+        );
+        assert_eq!(
+            battery_icon_rgba(Some(100.0), false),
+            battery_icon_rgba(Some(110.0), false)
         );
     }
 }

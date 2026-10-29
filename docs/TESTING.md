@@ -31,7 +31,7 @@ The copied diagnostics include application/runtime versions, transport state, VI
 The native transport is still disabled. The separate HID Probe can collect the
 non-invasive information needed to choose candidate HID collections for later
 testing. Download the `RazerBatteryTaskbar-HID-Probe` artifact from the latest
-[Rust Native Preview workflow](https://github.com/crytropy/RazerBatteryTaskbar/actions/workflows/rust-core.yml),
+[Rust Native workflow](https://github.com/crytropy/RazerBatteryTaskbar/actions/workflows/rust-core.yml),
 extract the ZIP, and open PowerShell in the extracted directory.
 
 ```powershell
@@ -127,16 +127,17 @@ to native continuous polling based solely on one successful query:
 retry consistency, disconnect/reconnect, and Synapse coexistence all
 still need validation.
 
-## Experimental Native Tray validation — 00B7 only
+## Native Tray validation — 00B7 receiver
 
 A one-shot query on the user's device succeeded and returned `Battery: 78.8%`
 with a verified acknowledgement and checksum.
 
-The Rust Native Preview now has a separately enabled continuous polling
-profile. With Synapse and Razer background services closed, launch:
+The native tray starts with the Windows HID transport by default.
+With Synapse and Razer background services closed, launch it with no
+arguments:
 
 ```powershell
-.\RazerBatteryTaskbar-Native-Preview.exe --experimental-hid-00b7
+.\RazerBatteryTaskbar-Native-<version>.exe
 ```
 
 Check the tray battery percentage and the versioned status JSON:
@@ -146,18 +147,25 @@ Invoke-RestMethod http://127.0.0.1:27212/v1/status |
     ConvertTo-Json -Depth 5
 ```
 
-Look for `transportName=windows-hid-00b7-experimental`,
-`transportReady=true` and `transportHealthy=true`. Repeat at intervals
-longer than 60 seconds; then test disconnection/reconnection. After stable
-operation with Synapse closed, test Synapse coexistence separately. If the
-mouse stops responding or the transport becomes unhealthy, quit the
-native tray and return to the normal compatibility version. Never
-replace the Windows/Razer driver as a workaround.
+Look for `transportName=windows-hid`, `transportReady=true` and
+`transportHealthy=true`. Repeat at intervals longer than 60 seconds; then
+test disconnection/reconnection. After stable operation with Synapse
+closed, test Synapse coexistence separately. If the mouse stops responding
+or the transport becomes unhealthy, quit the native tray and return to the
+normal compatibility version. Never replace the Windows/Razer driver as a
+workaround.
 
-**Known limitation:** the experimental HID read runs synchronously on
-the native tray event thread and waits about 500 ms for a reply.
-This is appropriate for the first opt-in proof of concept only, not a
-completed production polling architecture.
+Without a receiver attached, the tray must still start, show
+`No supported Razer devices detected`, and report `transportReady=true`
+with an empty `devices` list. To exercise the tray UI and the status API on
+a machine without any Razer hardware, start it with the debug flag
+`--placeholder-transport`; `/v1/status` then reports
+`transportName=placeholder` and `transportReady=false`. The retired
+`--experimental-hid-00b7` flag is accepted as a no-op and behaves exactly
+like a no-argument start.
+
+HID reads run on the background worker thread (see
+`docs/NATIVE_TRAY.md`), never on the tray event thread.
 
 
 ## Worker-thread regression tests
@@ -173,7 +181,7 @@ the Native Tray and JSON status API; the user reports successful reads both
 with Synapse enabled and disabled. These are positive point-in-time results,
 **not** proof of hours-long stress testing or hot-unplug/wake reliability.
 
-For a reconnect test, keep the experimental tray running, disconnect the
+For a reconnect test, keep the native tray running, disconnect the
 00B7 receiver, inspect `/v1/status`, reconnect the receiver, and confirm
 `connected=true`, `transportHealthy=true` and an up-to-date battery value.
 Do not substitute driver changes for an inaccessible HID interface.
@@ -181,8 +189,8 @@ Do not substitute driver changes for an inaccessible HID interface.
 
 ## Session-level polling health checks
 
-The Native Preview exposes `pollStatistics` in its read-only local API.
-With the experimental transport running:
+The native tray exposes `pollStatistics` in its read-only local API.
+With the native tray running:
 
 ```powershell
 (Invoke-RestMethod http://127.0.0.1:27212/v1/status).pollStatistics
@@ -190,8 +198,20 @@ With the experimental transport running:
 
 Allow the tray to run normally for a longer session. The counter
 `attempts` should increase as refreshes occur, while `failures`
-should remain low. A `success` means that transport enumeration and its
+should remain low. `deviceNotResponding` is counted separately: it
+increases when the device answered busy / failure / timeout, which is
+expected while the mouse idles or sleeps, and it is not a transport
+failure. The invariant `attempts = successes + failures +
+deviceNotResponding` always holds. A `success` means that transport enumeration and its
 request completed, but it can also mean a successful empty-device scan.
 `lastBatteryReadUnixMs` is the better indicator that an actual battery
 percentage was returned. Report timestamps are UTC milliseconds since
 Unix epoch. Telemetry is session-only and excludes serials and HID paths.
+
+Result of the long-run check (issue #5, DeathAdder V3 Pro `1532:00B7`,
+`--experimental-hid-00b7`, 2026-10-23 to 2026-10-24, 16.5 hours):
+440 attempts, 341 successes and 99 reads counted as `failures`. All 99 were
+`deviceNotResponding` from the idle mouse (before this field existed), with
+no false disconnects. Sleep and wake recovered automatically. Razer Synapse
+was not installed, so coexistence was not tested. See the validation table in
+[TRANSPORT.md](TRANSPORT.md) for the full list of scenarios.

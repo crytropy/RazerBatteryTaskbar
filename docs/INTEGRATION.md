@@ -4,13 +4,13 @@ RazerBatteryTaskbar exposes a transport-neutral, versioned snapshot for optional
 
 The contract lives in `razer-core::integration`. It is deliberately separate from HID, the Windows tray, and Seelen UI.
 
-## Schema version 1
+## Schema version 2
 
 Example:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "service": "RazerBatteryTaskbar",
   "coreVersion": "0.1.0",
   "transportName": "windows-hid",
@@ -22,6 +22,7 @@ Example:
     "attempts": 10,
     "successes": 9,
     "failures": 1,
+    "deviceNotResponding": 0,
     "lastSuccessfulScanUnixMs": 1791500000000,
     "lastBatteryReadUnixMs": 1791500000000,
     "lastDurationMs": 501
@@ -39,13 +40,19 @@ Example:
 }
 ```
 
-The device list uses the same fields as `primaryDevice`.
+The device list uses the same fields as `primaryDevice`. `productId` and
+`name` describe the logical device: a mouse whose wired and wireless product
+IDs are paired in the device database (for example the DeathAdder V3 Pro,
+`0x00B6` on its cable, `0x00B7` over its receiver) is always reported with its
+wireless product ID and base model name (`"Razer DeathAdder V3 Pro"`), whichever
+link is active, so plugging the cable in never looks like a different device
+or a disconnect.
 
 `transportReady` and `transportHealthy` are intentionally separate:
 
 - `transportReady=false` means the selected battery transport is not available/implemented for use yet;
 - `transportReady=true, transportHealthy=false` means a real transport exists but recent device reads are failing;
-- `transportName` identifies the active transport implementation without exposing HID paths or other private hardware identifiers.
+- `transportName` identifies the active transport implementation without exposing HID paths or other private hardware identifiers. It is informational: consumers should branch on `transportReady` / `transportHealthy`, not on this string. The native tray reports `windows-hid` for the default Windows HID transport and `placeholder` for the `--placeholder-transport` debug run. Preview builds before #8 reported `windows-hid-00b7-experimental`; the value change is not a schema change because the field's type and meaning are unchanged.
 
 ## Privacy boundary
 
@@ -64,6 +71,19 @@ Internal identifiers may be needed by the core to distinguish identical hardware
 Consumers must check `schemaVersion`.
 
 Fields may be added compatibly within a schema version. A breaking rename, semantic change, or field removal requires a new schema version.
+
+## Version history
+
+- **1** — initial contract: `transportName`, `transportReady`, `transportHealthy`,
+  `consecutiveTransportFailures`, `pollStatistics`, `primaryDevice`, `devices`.
+  `transportErrorKind` and the per-device `charging` field were added later
+  within version 1 as additive fields.
+- **2** — `pollStatistics.deviceNotResponding` was added and
+  `pollStatistics.failures` **no longer includes** those reads (see "Polling
+  statistics"). The new field alone would have been additive; the changed
+  meaning of `failures` is a semantic change, hence the bump. No field was
+  renamed or removed, so a consumer that does not interpret `failures` can
+  accept versions 1 and 2 alike; the bundled Seelen adapter does.
 
 ## Loopback HTTP transport
 
@@ -137,7 +157,7 @@ values and `connected` stays `true`, so integrations should treat them as
 No raw Windows error messages,
 serials, or device paths cross this JSON boundary.
 
-The public schema remains version 1 because this new field is additive.
+`transportErrorKind` was added within schema version 1 because the field is additive.
 
 
 ## Polling statistics
@@ -147,10 +167,19 @@ reset whenever the native tray process starts:
 
 - `attempts`: calls into the selected transport;
 - `successes`: transport reads which returned without an error, even if no receiver was present;
-- `failures`: transport reads that returned an error;
+- `failures`: transport reads that returned a real error (`enumeration`, `open`,
+  `send`, `receive`, `invalidResponse`, `configuration` or `unknown`);
+- `deviceNotResponding`: transport reads where the device answered busy / failure /
+  timeout, which is what an idle or sleeping wireless mouse does. These are not
+  counted in `failures`, so `attempts = successes + failures + deviceNotResponding`;
 - `lastSuccessfulScanUnixMs`: timestamp of the most recent successful device scan;
 - `lastBatteryReadUnixMs`: timestamp of the most recent successful scan which returned a battery percentage;
 - `lastDurationMs`: elapsed time for the most recent attempt, including any HID report response delay.
+
+`deviceNotResponding` was added to `pollStatistics` in schema version 2.
+`failures` and every other existing field keep their names, but `failures` no
+longer includes `deviceNotResponding` reads; that change of meaning is why
+the schema version was bumped rather than treated as an additive change.
 
 Times are UTC Unix epoch milliseconds. Timestamps are `null` until that event
 occurs. Counts reset on application restart and are not persisted to disk.
