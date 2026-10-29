@@ -53,9 +53,9 @@ Before the Rust migration is finalized, HIDAPI / native Windows HID access shoul
 
 ## Final transport choice
 
-The Rust core's production Windows transport is native HID feature reports through `hidapi` (windows-native backend), opening the device's HID collection once per poll. The decision, the rejected alternatives (libusb / WinUSB), the hardware evidence, and the known limitations (Synapse coexistence unverified, single product ID until #18, 60 s minimum poll) are recorded in [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md). The Electron node-usb transport remains a legacy compatibility layer only.
+The Rust core's production Windows transport is native HID feature reports through `hidapi` (windows-native backend), opening the device's HID collection once per poll. The decision, the rejected alternatives (libusb / WinUSB), the hardware evidence, and the known limitations (Synapse coexistence unverified, one device model at a time, 60 s minimum poll) are recorded in [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md). The Electron node-usb transport remains a legacy compatibility layer only.
 
-Phase 7 is complete and #8 made the HID transport the native tray's default. Remaining items are tracked as follow-ups: #12 / #13 (reconnect latency), #16 (hibernate retest), #18 (wired PID).
+Phase 7 is complete and #8 made the HID transport the native tray's default. Remaining items are tracked as follow-ups: #12 / #13 (reconnect latency), #16 (hibernate retest). The wired product ID of the DeathAdder V3 Pro is read since #18 (see below).
 
 ### Two feature queries per poll
 
@@ -66,7 +66,25 @@ Each poll opens the HID collection once and sends two 90-byte power-class (`0x07
 
 The charging query is best effort. It is only sent after the battery reply was accepted, and if it fails, is rejected, or comes back as `deviceNotResponding`, the battery result stands and `charging` is reported as `null`; the charging query alone never produces a transport error or disconnects the device. While the mouse is asleep the battery query itself returns `deviceNotResponding`, so the last battery *and* charging values are retained together, exactly as before. A poll therefore takes roughly twice the previous reply delay (about 1 s).
 
-Known limitation: a DeathAdder V3 Pro charging over its USB cable re-enumerates as the wired product ID `00B6`, which this transport does not match yet, so cable charging is not observed until #18 adds the wired PID. The `charging` flag currently reflects what the wireless PID `00B7` reports.
+### Wired / wireless twins are one device
+
+A DeathAdder V3 Pro charging over its USB cable enumerates as the wired product ID `00B6` instead of (or next to) the receiver `00B7`. The shared device database marks such twins with an optional `pairing` object (`{ "model": "Razer DeathAdder V3 Pro", "link": "wired" | "wireless" }`); `device_db::logical_device` resolves either product ID to one logical device whose identity is the wireless (receiver) product ID and whose name is the base model name. The transport:
+
+1. enumerates both twins with the same interface 0 / usage `0001:0002` filter, still refusing more than one matching collection per product ID (`ambiguousCollection`);
+2. when both are enumerated reads only the wired twin, because the receiver usually stays enumerated while the mouse is on the cable but answers `deviceNotResponding`;
+3. emits exactly one `DeviceReading` carrying the canonical product ID `00B7` and the name `Razer DeathAdder V3 Pro`, whichever twin answered.
+
+The device id therefore stays `usb:1532:00B7` across cable plug / unplug, `DeviceManager` never sees a second entry or a `Disconnected` event, and a `productId` primary preference keeps matching. `/v1/status` reports `productId: 183` (`0x00B7`) and `name: "Razer DeathAdder V3 Pro"` in both modes; it does not say which link is active. The other paired mice in the database (Basilisk V3 Pro, DeathAdder V2 Pro, Naga V2 Pro, Viper V2 Pro, Viper Ultimate, Cobra Pro) carry the same annotation, but the transport still reads only the DeathAdder V3 Pro, the one model validated on hardware.
+
+Pending hardware verification (#18): the cable test itself. With the tray running, plug the cable in and confirm within one poll that `connected` stays `true`, `battery` is present and `charging` becomes `true`; unplug it and confirm the same without a `connected=false` in between. Before or alongside that, record the wired collection with the read-only probe and paste both outputs into the ticket:
+
+```powershell
+# cable plugged in: is 00B6 exposed as MI_00 / usage 0001:0002, and is 00B7 still listed?
+.\RazerBatteryTaskbar-HID-Probe.exe --known-only --pid 0x00B6
+.\RazerBatteryTaskbar-HID-Probe.exe --known-only --pid 0x00B7
+```
+
+If the wired twin exposes the Razer protocol on a different collection than the receiver, the interface / usage filter needs a per-link entry; nothing in the pairing model prevents that.
 
 ## Phase 7 exit criteria
 
@@ -98,7 +116,9 @@ No driver changes are part of this process.
 ## Verified candidate for 1532:00B7
 
 User HID enumeration found the stock DeathAdder V3 Pro receiver reporting
-`MI_00 / usage_page=0001 / usage=0002`, among 12 HID collections.
+`MI_00 / usage_page=0001 / usage=0002`, among 12 HID collections. The wired
+twin `1532:00B6` is matched with the same filter since #18; its probe output
+has not been recorded yet (see "Wired / wireless twins are one device").
 An independent OpenMouse hardware test reports successful status reads
 over this same collection on a DeathAdder V3 Pro receiver with Synapse
 fully closed. Microsoft documents Generic Desktop Mouse top-level

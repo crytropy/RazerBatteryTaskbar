@@ -30,7 +30,7 @@ use razer_core::settings::{AppSettings, PrimaryDevicePreference, SettingsStore};
 use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
 #[cfg(windows)]
-use razer_core::windows_hid::ExperimentalDeathAdderTransport;
+use razer_core::windows_hid::WindowsHidTransport;
 use resume_recovery::{RecoveryOutcome, RecoveryTick, ResumeRecovery};
 use settings_menu::{MIN_POLL_INTERVAL_SECONDS, SettingsMenu};
 use single_instance::SingleInstance;
@@ -74,7 +74,7 @@ impl BatteryTransport for PlaceholderTransport {
 enum AppTransport {
     Placeholder(PlaceholderTransport),
     #[cfg(windows)]
-    WindowsHid(ExperimentalDeathAdderTransport),
+    WindowsHid(WindowsHidTransport),
 }
 
 impl BatteryTransport for AppTransport {
@@ -117,9 +117,7 @@ impl TransportChoice {
         match self {
             Self::Placeholder => Ok(AppTransport::Placeholder(PlaceholderTransport)),
             #[cfg(windows)]
-            Self::WindowsHid => Ok(AppTransport::WindowsHid(
-                ExperimentalDeathAdderTransport::new(),
-            )),
+            Self::WindowsHid => Ok(AppTransport::WindowsHid(WindowsHidTransport::new())),
             #[cfg(not(windows))]
             Self::WindowsHid => Err("the Windows HID transport requires Windows".into()),
         }
@@ -820,7 +818,7 @@ mod tests {
         let device = FrontendDeviceState {
             vendor_id: 0x1532,
             product_id: 0x00B7,
-            name: Some("Razer Deathadder V3 Pro Wireless".to_string()),
+            name: Some("Razer DeathAdder V3 Pro".to_string()),
             device_type: DeviceType::Mouse,
             battery,
             charging,
@@ -842,19 +840,19 @@ mod tests {
     fn status_text_appends_charging_in_the_existing_format() {
         assert_eq!(
             format_status(&healthy_snapshot(Some(64.0), Some(true))),
-            "Razer Deathadder V3 Pro Wireless — 64.0% — Charging"
+            "Razer DeathAdder V3 Pro — 64.0% — Charging"
         );
         assert_eq!(
             format_status(&healthy_snapshot(None, Some(true))),
-            "Razer Deathadder V3 Pro Wireless — Battery unavailable — Charging"
+            "Razer DeathAdder V3 Pro — Battery unavailable — Charging"
         );
         assert_eq!(
             format_status(&healthy_snapshot(Some(64.0), Some(false))),
-            "Razer Deathadder V3 Pro Wireless — 64.0%"
+            "Razer DeathAdder V3 Pro — 64.0%"
         );
         assert_eq!(
             format_status(&healthy_snapshot(Some(64.0), None)),
-            "Razer Deathadder V3 Pro Wireless — 64.0%"
+            "Razer DeathAdder V3 Pro — 64.0%"
         );
     }
 

@@ -40,7 +40,13 @@ Example:
 }
 ```
 
-The device list uses the same fields as `primaryDevice`.
+The device list uses the same fields as `primaryDevice`. `productId` and
+`name` describe the logical device: a mouse whose wired and wireless product
+IDs are paired in the device database (for example the DeathAdder V3 Pro,
+`0x00B6` on its cable, `0x00B7` over its receiver) is always reported with its
+wireless product ID and base model name (`"Razer DeathAdder V3 Pro"`), whichever
+link is active, so plugging the cable in never looks like a different device
+or a disconnect.
 
 `transportReady` and `transportHealthy` are intentionally separate:
 

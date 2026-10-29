@@ -4,7 +4,7 @@ use std::time::Duration;
 use hidapi::{HidApi, HidDevice};
 
 use crate::RAZER_VENDOR_ID;
-use crate::device_db::get_product;
+use crate::device_db::{LogicalDevice, get_product, logical_device};
 use crate::protocol::{
     CHARGING_STATUS_COMMAND, CRC_OFFSET, REPORT_SIZE, build_battery_request,
     build_charging_request, calculate_crc, parse_battery_level, parse_charging_status,
@@ -12,7 +12,10 @@ use crate::protocol::{
 use crate::state::DeviceReading;
 use crate::transport::{BatteryTransport, TransportError, TransportErrorKind};
 
-const PRODUCT_ID: u16 = 0x00B7;
+/// The DeathAdder V3 Pro receiver: the one model validated on hardware. Its
+/// wired twin (`00B6`) is resolved through the database pairing, so the
+/// transport reads the mouse over the receiver or over its USB cable alike.
+const SUPPORTED_PRODUCT_ID: u16 = 0x00B7;
 const INTERFACE_NUMBER: i32 = 0;
 const USAGE_PAGE: u16 = 0x0001;
 const USAGE: u16 = 0x0002;
@@ -26,15 +29,54 @@ const COMMAND_CLASS: u8 = 0x07;
 const COMMAND_ID: u8 = 0x80;
 const RESPONSE_DELAY: Duration = Duration::from_millis(500);
 
-pub struct ExperimentalDeathAdderTransport;
+/// Native Windows HID feature-report transport (ADR-0001), reported as
+/// `windows-hid`. It tracks one logical device and accepts every product ID
+/// that device can enumerate as.
+pub struct WindowsHidTransport {
+    device: LogicalDevice,
+}
 
-impl ExperimentalDeathAdderTransport {
+impl WindowsHidTransport {
     pub fn new() -> Self {
-        Self
+        Self {
+            device: logical_device(SUPPORTED_PRODUCT_ID)
+                .expect("supported product ID must exist in the embedded Razer device database"),
+        }
+    }
+
+    /// The logical device this transport reads, with its wired / wireless twins.
+    pub fn supported_device(&self) -> &LogicalDevice {
+        &self.device
+    }
+
+    /// Choose which enumerated product ID to query. The wired twin wins when
+    /// both are present: on the cable the receiver usually keeps enumerating
+    /// but answers `deviceNotResponding`.
+    fn select_product_id(&self, present: &[u16]) -> Option<u16> {
+        self.device
+            .product_ids()
+            .into_iter()
+            .find(|product_id| present.contains(product_id))
+    }
+
+    /// Build the reading for the logical device, whichever twin answered.
+    /// The canonical product ID and base model name keep the device id and
+    /// the user-visible name identical across cable plug / unplug, so the
+    /// manager never sees a second device or a disconnect.
+    fn reading(&self, battery: f32, charging: Option<bool>) -> DeviceReading {
+        DeviceReading {
+            vendor_id: RAZER_VENDOR_ID,
+            product_id: self.device.product_id,
+            product_name: Some(self.device.name.clone()),
+            device_type: self.device.device_type,
+            battery: Some(battery),
+            charging,
+            serial_number: None,
+        }
     }
 }
 
-impl Default for ExperimentalDeathAdderTransport {
+impl Default for WindowsHidTransport {
     fn default() -> Self {
         Self::new()
     }
@@ -175,7 +217,7 @@ fn query_feature(
     Ok(reply[..received].to_vec())
 }
 
-impl BatteryTransport for ExperimentalDeathAdderTransport {
+impl BatteryTransport for WindowsHidTransport {
     fn name(&self) -> &'static str {
         "windows-hid"
     }
@@ -188,36 +230,59 @@ impl BatteryTransport for ExperimentalDeathAdderTransport {
             )
         })?;
 
-        let mut candidates = api.device_list().filter(|device| {
+        // One matching collection per product ID; both twins may be present
+        // at once (mouse on the cable, receiver still plugged in).
+        let product_ids = self.device.product_ids();
+        let mut candidates: Vec<&hidapi::DeviceInfo> = Vec::new();
+
+        for device in api.device_list().filter(|device| {
             device.vendor_id() == RAZER_VENDOR_ID
-                && device.product_id() == PRODUCT_ID
+                && product_ids.contains(&device.product_id())
                 && device.interface_number() == INTERFACE_NUMBER
                 && device.usage_page() == USAGE_PAGE
                 && device.usage() == USAGE
-        });
+        }) {
+            if candidates
+                .iter()
+                .any(|known| known.product_id() == device.product_id())
+            {
+                return Err(TransportError::with_kind(
+                    TransportErrorKind::AmbiguousCollection,
+                    format!(
+                        "more than one matching {:04X} HID collection; refusing ambiguous selection",
+                        device.product_id()
+                    ),
+                ));
+            }
 
-        let Some(candidate) = candidates.next() else {
+            candidates.push(device);
+        }
+
+        let present: Vec<u16> = candidates
+            .iter()
+            .map(|device| device.product_id())
+            .collect();
+
+        let Some(product_id) = self.select_product_id(&present) else {
             return Ok(Vec::new());
         };
 
-        if candidates.next().is_some() {
-            return Err(TransportError::with_kind(
-                TransportErrorKind::AmbiguousCollection,
-                "more than one matching 00B7 HID collection; refusing ambiguous selection",
-            ));
-        }
+        let candidate = candidates
+            .iter()
+            .find(|device| device.product_id() == product_id)
+            .expect("selected product ID comes from the enumerated candidates");
 
-        let product = get_product(PRODUCT_ID).ok_or_else(|| {
+        let product = get_product(product_id).ok_or_else(|| {
             TransportError::with_kind(
                 TransportErrorKind::Configuration,
-                "00B7 missing from Razer device database",
+                format!("{product_id:04X} missing from Razer device database"),
             )
         })?;
 
         let device = candidate.open_device(&api).map_err(|_| {
             TransportError::with_kind(
                 TransportErrorKind::Open,
-                "unable to open DeathAdder HID collection",
+                format!("unable to open {} HID collection", self.device.name),
             )
         })?;
 
@@ -238,21 +303,14 @@ impl BatteryTransport for ExperimentalDeathAdderTransport {
         .and_then(|reply| parse_charging_reply(&reply, transaction_id))
         .ok();
 
-        Ok(vec![DeviceReading {
-            vendor_id: RAZER_VENDOR_ID,
-            product_id: PRODUCT_ID,
-            product_name: Some(product.name.clone()),
-            device_type: product.device_type,
-            battery: Some(battery),
-            charging,
-            serial_number: None,
-        }])
+        Ok(vec![self.reading(battery, charging)])
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::DeviceType;
 
     fn command_reply(transaction_id: u8, command: u8, payload: u8) -> [u8; REPORT_SIZE + 1] {
         let mut report = [0u8; REPORT_SIZE];
@@ -369,8 +427,52 @@ mod tests {
 
     #[test]
     fn transport_reports_a_stable_non_experimental_name() {
-        let transport = ExperimentalDeathAdderTransport::new();
+        let transport = WindowsHidTransport::new();
         assert_eq!(transport.name(), "windows-hid");
         assert!(transport.is_ready());
+    }
+
+    #[test]
+    fn transport_reads_both_product_ids_of_the_deathadder_v3_pro() {
+        let transport = WindowsHidTransport::new();
+        let device = transport.supported_device();
+
+        assert_eq!(device.name, "Razer DeathAdder V3 Pro");
+        assert_eq!(device.product_ids(), vec![0x00B6, 0x00B7]);
+    }
+
+    #[test]
+    fn wired_twin_is_preferred_when_both_are_enumerated() {
+        let transport = WindowsHidTransport::new();
+
+        // Receiver still enumerated while the mouse is on the cable: read the cable.
+        assert_eq!(transport.select_product_id(&[0x00B7, 0x00B6]), Some(0x00B6));
+        assert_eq!(transport.select_product_id(&[0x00B6, 0x00B7]), Some(0x00B6));
+        // Single product ID present: read whichever one it is.
+        assert_eq!(transport.select_product_id(&[0x00B7]), Some(0x00B7));
+        assert_eq!(transport.select_product_id(&[0x00B6]), Some(0x00B6));
+        // Nothing (or only foreign hardware) enumerated: no device.
+        assert_eq!(transport.select_product_id(&[]), None);
+        assert_eq!(transport.select_product_id(&[0x00AB]), None);
+    }
+
+    #[test]
+    fn reading_describes_the_logical_device_not_the_answering_twin() {
+        let transport = WindowsHidTransport::new();
+
+        let reading = transport.reading(80.0, Some(true));
+
+        assert_eq!(reading.vendor_id, RAZER_VENDOR_ID);
+        // Canonical identity is the receiver PID, whether the mouse answered
+        // over the receiver or over its cable; the name has no link suffix.
+        assert_eq!(reading.product_id, 0x00B7);
+        assert_eq!(
+            reading.product_name.as_deref(),
+            Some("Razer DeathAdder V3 Pro")
+        );
+        assert_eq!(reading.device_type, DeviceType::Mouse);
+        assert_eq!(reading.battery, Some(80.0));
+        assert_eq!(reading.charging, Some(true));
+        assert_eq!(reading.serial_number, None);
     }
 }
