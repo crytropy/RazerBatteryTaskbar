@@ -6,6 +6,7 @@ mod device_events;
 mod polling;
 #[cfg(windows)]
 mod power_events;
+mod primary_device_menu;
 mod resume_recovery;
 mod settings_menu;
 mod startup;
