@@ -1,14 +1,19 @@
-name: Rust Native Preview
+name: Rust Native
 
 on:
   push:
     branches:
       - main
+    # Path filters are not evaluated for tag pushes, so every v* tag builds
+    # and publishes a release regardless of what changed.
+    tags:
+      - 'v*'
     paths:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'native/**'
       - 'src/devices/razer-products.json'
+      - 'scripts/Publish-ReleaseAssets.ps1'
       - '.github/workflows/rust-core.yml'
   pull_request:
     branches:
@@ -26,11 +31,15 @@ permissions:
 
 concurrency:
   group: rust-native-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a tag run half way through publishing a release.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   test-and-build:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.native.outputs.version }}
+      prerelease: ${{ steps.native.outputs.prerelease }}
 
     steps:
       - name: Checkout repository
@@ -53,33 +62,55 @@ jobs:
       - name: Test Rust workspace (including HID probe)
         run: cargo test --workspace --all-features --all-targets
 
-      - name: Build native tray preview
+      - name: Build native tray
         run: cargo build -p razer-tray --release
 
-      - name: Prepare native preview artifact
+      - name: Prepare native release files
+        id: native
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path "dist/native-preview" -Force | Out-Null
+          # v1.0.0-rc.1 -> 1.0.0-rc.1. Every non-tag build uses the fixed
+          # version "dev" so the dev-build asset name stays stable.
+          $isTag = $env:GITHUB_REF -like 'refs/tags/v*'
+          if ($isTag) {
+            $version = $env:GITHUB_REF_NAME.Substring(1)
+          } else {
+            $version = 'dev'
+          }
+          # A SemVer pre-release (anything after a "-") is published with
+          # --prerelease and never becomes the "latest" release.
+          $prerelease = if ($version.Contains('-')) { 'true' } else { 'false' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$prerelease" >> $env:GITHUB_OUTPUT
 
-          $exe = "dist/native-preview/RazerBatteryTaskbar-Native-Preview.exe"
+          if ($isTag) {
+            $cargoVersion = (Select-String -Path "native/razer-tray/Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+            if ($cargoVersion -ne $version.Split('-')[0]) {
+              Write-Host "::warning::Tag $env:GITHUB_REF_NAME does not match the razer-tray Cargo version $cargoVersion (the app reports the Cargo version)."
+            }
+          }
+
+          New-Item -ItemType Directory -Path "dist/native" -Force | Out-Null
+
+          $name = "RazerBatteryTaskbar-Native-$version.exe"
+          $exe = "dist/native/$name"
           Copy-Item "target/release/razer-tray.exe" $exe -Force
 
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  RazerBatteryTaskbar-Native-Preview.exe" |
-            Set-Content "dist/native-preview/SHA256SUMS.txt" -Encoding ascii
+          "$hash  $name" | Set-Content "dist/native/SHA256SUMS.txt" -Encoding ascii
 
           @"
-          RazerBatteryTaskbar Native Preview
+          RazerBatteryTaskbar Native $version
 
           Commit: $env:GITHUB_SHA
 
-          This is a preview of the Rust/native Windows tray frontend.
-          The tray, settings, notifications, startup registration, single-instance
-          protection, and read-only local integration API are implemented.
+          Rust/native Windows tray frontend: tray icon and menu, settings,
+          low/critical battery notifications, start with Windows,
+          single-instance protection, and a read-only local integration API.
 
           Default startup uses the native Windows HID transport (windows-hid)
           and reads real battery values with no command-line flag:
-            .\RazerBatteryTaskbar-Native-Preview.exe
+            .\$name
 
           The transport currently targets only the DeathAdder V3 Pro receiver
           1532:00B7, MI_00, usage 0001:0002. It sends one battery query
@@ -88,6 +119,8 @@ jobs:
           Synapse coexistence is not verified; close Synapse and Razer
           services for the first run. Without a receiver the tray starts
           normally and shows "No supported Razer devices detected".
+          For other hardware use the legacy Electron compatibility build
+          (RazerBatteryTaskbar-Windows-Setup.exe, when attached to the release).
 
           Debug options:
             --placeholder-transport   run without any battery transport
@@ -98,15 +131,18 @@ jobs:
           the next time the toggle is enabled.
           Keep this EXE in a permanent location before enabling startup.
 
+          Verify the download against SHA256SUMS.txt:
+            (Get-FileHash .\$name -Algorithm SHA256).Hash
+
           Integration endpoint:
           http://127.0.0.1:27212/v1/status
-          "@ | Set-Content "dist/native-preview/README-NATIVE-PREVIEW.txt" -Encoding utf8
+          "@ | Set-Content "dist/native/README-NATIVE.txt" -Encoding utf8
 
-      - name: Upload native preview
+      - name: Upload native build
         uses: actions/upload-artifact@v4
         with:
-          name: RazerBatteryTaskbar-Native-Preview
-          path: dist/native-preview/*
+          name: RazerBatteryTaskbar-Native
+          path: dist/native/*
           if-no-files-found: error
 
       - name: Build HID enumeration probe
@@ -206,3 +242,72 @@ jobs:
           name: RazerBatteryTaskbar-Battery-Once-Test
           path: dist/battery-once/*
           if-no-files-found: error
+
+  # Publishes the native build. Runs only for v* tags (formal release) and for
+  # pushes to main (attaches to the dev-build pre-release). The job above keeps
+  # a read-only token; only this job can write releases.
+  publish-release:
+    needs: test-and-build
+    if: >-
+      github.event_name != 'pull_request' &&
+      (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download native build
+        uses: actions/download-artifact@v4
+        with:
+          name: RazerBatteryTaskbar-Native
+          path: dist/native
+
+      # This workflow owns RazerBatteryTaskbar-Native-<version>.exe,
+      # SHA256SUMS.txt and README-NATIVE.txt. build-windows.yml owns
+      # RazerBatteryTaskbar-Windows-Setup.exe. Whichever workflow reaches the
+      # release first creates it; the other one only uploads its own files.
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.test-and-build.outputs.version }}
+          PRERELEASE: ${{ needs.test-and-build.outputs.prerelease }}
+        run: |
+          $params = @{
+            Tag           = $env:GITHUB_REF_NAME
+            Files         = @(
+              "dist/native/RazerBatteryTaskbar-Native-$env:VERSION.exe",
+              "dist/native/SHA256SUMS.txt",
+              "dist/native/README-NATIVE.txt"
+            )
+            Title         = "RazerBatteryTaskbar $env:GITHUB_REF_NAME"
+            GenerateNotes = $true
+          }
+          if ($env:PRERELEASE -eq 'true') { $params.Prerelease = $true }
+          ./scripts/Publish-ReleaseAssets.ps1 @params
+
+      - name: Attach to development build
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The dev-build tag is moved by build-windows.yml; this job only adds
+          # the native files (fixed version "dev") to that pre-release.
+          $params = @{
+            Tag        = 'dev-build'
+            Files      = @(
+              "dist/native/RazerBatteryTaskbar-Native-dev.exe",
+              "dist/native/SHA256SUMS.txt",
+              "dist/native/README-NATIVE.txt"
+            )
+            Title      = 'Development Build'
+            Notes      = 'Latest automatic builds from the main branch. These builds are intended for testing and may change frequently.'
+            Target     = $env:GITHUB_SHA
+            Prerelease = $true
+          }
+          ./scripts/Publish-ReleaseAssets.ps1 @params
