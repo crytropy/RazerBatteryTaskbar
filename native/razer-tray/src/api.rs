@@ -31,12 +31,14 @@ pub fn status_content_type(url: &str) -> Option<&'static str> {
 
 pub type SharedIntegrationState = Arc<RwLock<String>>;
 
-pub fn initial_state() -> SharedIntegrationState {
+/// Snapshot served until the worker completes its first read: the selected
+/// transport with no devices and zeroed poll statistics.
+pub fn initial_state(transport_name: &str, transport_ready: bool) -> SharedIntegrationState {
     let snapshot = FrontendSnapshot {
         devices: Vec::new(),
         primary_device: None,
-        transport_name: "placeholder".to_string(),
-        transport_ready: false,
+        transport_name: transport_name.to_string(),
+        transport_ready,
         transport_healthy: true,
         consecutive_transport_failures: 0,
         transport_error_kind: None,
@@ -145,13 +147,23 @@ mod tests {
 
     #[test]
     fn initial_api_state_is_valid_versioned_json() {
-        let state = initial_state();
+        let state = initial_state("windows-hid", true);
         let json = state.read().unwrap();
 
         assert!(json.contains(r#""schemaVersion":1"#));
+        assert!(json.contains(r#""transportName":"windows-hid""#));
+        assert!(json.contains(r#""transportReady":true"#));
+        assert!(json.contains(r#""devices":[]"#));
+        assert!(json.contains(r#""attempts":0"#));
+    }
+
+    #[test]
+    fn initial_api_state_reflects_the_placeholder_debug_transport() {
+        let state = initial_state("placeholder", false);
+        let json = state.read().unwrap();
+
         assert!(json.contains(r#""transportName":"placeholder""#));
         assert!(json.contains(r#""transportReady":false"#));
-        assert!(json.contains(r#""devices":[]"#));
     }
 
     #[test]
@@ -170,7 +182,7 @@ mod tests {
 
     #[test]
     fn update_state_publishes_latest_frontend_snapshot_without_private_ids() {
-        let state = initial_state();
+        let state = initial_state("windows-hid", true);
         let snapshot = FrontendSnapshot {
             devices: vec![FrontendDeviceState {
                 vendor_id: 0x1532,

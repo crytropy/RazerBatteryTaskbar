@@ -640,7 +640,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let initial_poll_interval = Duration::from_secs(settings.poll_interval_seconds);
 
-    let integration_state = api::initial_state();
+    let integration_state = api::initial_state(transport.name(), transport.is_ready());
     let _api_thread = match api::start(integration_state.clone()) {
         Ok(thread) => Some(thread),
         Err(error) => {
