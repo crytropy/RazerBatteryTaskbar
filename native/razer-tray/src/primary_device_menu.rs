@@ -4,9 +4,96 @@
 //! submenu is rebuilt whenever the connected devices change. The choice is
 //! keyed on the Razer product ID the core already uses for its primary
 //! preference; serial numbers never reach this module.
+use std::error::Error;
+
 use razer_core::device_db;
 use razer_core::frontend::FrontendSnapshot;
 use razer_core::settings::PrimaryDevicePreference;
+use tray_icon::menu::{CheckMenuItem, MenuEvent, Submenu};
+
+const AUTOMATIC_ID: &str = "primary-device.auto";
+
+/// The submenu itself: a stable "Automatic" entry followed by one check item
+/// per [`DeviceChoice`]. The device items are torn down and re-appended when
+/// the choices change; `tray-icon`/`muda` support that on a live submenu.
+pub struct PrimaryDeviceMenu {
+    pub root: Submenu,
+    automatic_item: CheckMenuItem,
+    device_items: Vec<(u16, CheckMenuItem)>,
+    choices: Vec<DeviceChoice>,
+}
+
+impl PrimaryDeviceMenu {
+    pub fn new(preference: &PrimaryDevicePreference) -> Result<Self, Box<dyn Error>> {
+        let root = Submenu::with_id("primary-device", "Primary device", true);
+        let automatic_item = CheckMenuItem::with_id(
+            AUTOMATIC_ID,
+            "Automatic",
+            true,
+            *preference == PrimaryDevicePreference::Auto,
+            None,
+        );
+        root.append(&automatic_item)?;
+
+        Ok(Self {
+            root,
+            automatic_item,
+            device_items: Vec::new(),
+            choices: Vec::new(),
+        })
+    }
+
+    /// Bring the submenu in line with the latest snapshot and preference.
+    /// Returns `true` when the device entries were rebuilt.
+    pub fn update(
+        &mut self,
+        snapshot: Option<&FrontendSnapshot>,
+        preference: &PrimaryDevicePreference,
+    ) -> bool {
+        self.automatic_item
+            .set_checked(*preference == PrimaryDevicePreference::Auto);
+
+        let choices = device_choices(snapshot, preference);
+        if choices == self.choices {
+            return false;
+        }
+
+        for (_, item) in self.device_items.drain(..) {
+            if let Err(error) = self.root.remove(&item) {
+                eprintln!("failed to remove a primary-device entry: {error}");
+            }
+        }
+
+        for choice in &choices {
+            let item = CheckMenuItem::with_id(
+                format!("primary-device.{:04x}", choice.product_id),
+                &choice.label,
+                choice.enabled,
+                choice.checked,
+                None,
+            );
+            if let Err(error) = self.root.append(&item) {
+                eprintln!("failed to add a primary-device entry: {error}");
+                continue;
+            }
+            self.device_items.push((choice.product_id, item));
+        }
+
+        self.choices = choices;
+        true
+    }
+
+    /// The preference a click on this submenu stands for, if the event is ours.
+    pub fn preference_for_event(&self, event: &MenuEvent) -> Option<PrimaryDevicePreference> {
+        if event.id == *self.automatic_item.id() {
+            return Some(PrimaryDevicePreference::Auto);
+        }
+
+        self.device_items.iter().find_map(|(product_id, item)| {
+            (event.id == *item.id()).then_some(PrimaryDevicePreference::ProductId(*product_id))
+        })
+    }
+}
 
 /// One selectable device of the submenu, independent of the menu toolkit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +164,7 @@ mod tests {
     use super::*;
     use razer_core::frontend::{FrontendDeviceState, PollStatistics};
     use razer_core::state::DeviceType;
+    use tray_icon::menu::{MenuId, MenuItemKind};
 
     fn device(
         product_id: u16,
@@ -198,6 +286,86 @@ mod tests {
                     enabled: false,
                     checked: true,
                 },
+            ]
+        );
+    }
+
+    fn checked_labels(menu: &PrimaryDeviceMenu) -> Vec<(String, bool, bool)> {
+        menu.root
+            .items()
+            .iter()
+            .map(|item| match item {
+                MenuItemKind::Check(item) => (item.text(), item.is_enabled(), item.is_checked()),
+                other => panic!("unexpected submenu child: {:?}", other.id()),
+            })
+            .collect()
+    }
+
+    fn event_for(menu: &PrimaryDeviceMenu, position: usize) -> MenuEvent {
+        MenuEvent {
+            id: menu.root.items()[position].id().clone(),
+        }
+    }
+
+    #[test]
+    fn submenu_is_rebuilt_from_each_snapshot_and_maps_clicks_back_to_preferences() {
+        let mut menu = PrimaryDeviceMenu::new(&PrimaryDevicePreference::Auto).unwrap();
+        assert_eq!(
+            checked_labels(&menu),
+            vec![("Automatic".to_string(), true, true)],
+            "before the first snapshot only the stable entry exists"
+        );
+
+        assert!(menu.update(
+            Some(&snapshot(vec![mouse(true), headset(true)])),
+            &PrimaryDevicePreference::Auto
+        ));
+        assert_eq!(
+            checked_labels(&menu),
+            vec![
+                ("Automatic".to_string(), true, true),
+                ("Razer Deathadder V3 Pro Wireless".to_string(), true, false),
+                ("Razer BlackShark V2 Pro".to_string(), true, false),
+            ]
+        );
+        assert!(
+            !menu.update(
+                Some(&snapshot(vec![mouse(true), headset(true)])),
+                &PrimaryDevicePreference::Auto
+            ),
+            "an unchanged device list does not rebuild the submenu"
+        );
+
+        assert_eq!(
+            menu.preference_for_event(&event_for(&menu, 2)),
+            Some(PrimaryDevicePreference::ProductId(0x0527))
+        );
+        assert_eq!(
+            menu.preference_for_event(&event_for(&menu, 0)),
+            Some(PrimaryDevicePreference::Auto)
+        );
+        assert_eq!(
+            menu.preference_for_event(&MenuEvent {
+                id: MenuId::new("settings")
+            }),
+            None
+        );
+
+        // The headset is unplugged while it is the preference.
+        assert!(menu.update(
+            Some(&snapshot(vec![mouse(true), headset(false)])),
+            &PrimaryDevicePreference::ProductId(0x0527)
+        ));
+        assert_eq!(
+            checked_labels(&menu),
+            vec![
+                ("Automatic".to_string(), true, false),
+                ("Razer Deathadder V3 Pro Wireless".to_string(), true, false),
+                (
+                    "Razer BlackShark V2 Pro (disconnected)".to_string(),
+                    false,
+                    true
+                ),
             ]
         );
     }
