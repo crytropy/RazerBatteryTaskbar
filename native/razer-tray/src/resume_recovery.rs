@@ -6,9 +6,43 @@
 //! real battery read. It is a pure state machine driven by the tray event loop:
 //! it never touches HID and never blocks.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
 use std::time::Duration;
 
 use razer_core::frontend::FrontendSnapshot;
+
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Mints a fresh generation for a resume that was just observed.
+pub fn next_generation() -> u64 {
+    NEXT_GENERATION.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+/// Delivers the recovery ticks for `generation` from a sleeping helper thread,
+/// one per [`RECOVERY_DELAYS`] entry. `deliver` runs on that thread and must
+/// only hand the tick to the event loop; the scheduler decides on the UI
+/// thread whether the tick still matters.
+pub fn spawn_ticks<F>(generation: u64, deliver: F)
+where
+    F: Fn(RecoveryTick) + Send + 'static,
+{
+    let spawned = thread::Builder::new()
+        .name("razer-resume-recovery".to_string())
+        .spawn(move || {
+            let mut elapsed = Duration::ZERO;
+            for tick in RecoveryTick::series(generation) {
+                let delay = tick.delay();
+                thread::sleep(delay.saturating_sub(elapsed));
+                elapsed = delay;
+                deliver(tick);
+            }
+        });
+
+    if let Err(error) = spawned {
+        eprintln!("resume recovery thread unavailable: {error}");
+    }
+}
 
 /// Offsets, measured from the resume event, at which recovery refreshes run.
 pub const RECOVERY_DELAYS: [Duration; 3] = [
@@ -106,6 +140,7 @@ impl ResumeRecovery {
         }
     }
 
+    #[cfg(test)]
     pub fn is_active(&self) -> bool {
         self.active.is_some()
     }
@@ -221,5 +256,71 @@ mod tests {
         let snapshot = core.frontend_snapshot();
         assert_eq!(snapshot.poll_statistics.attempts, 3);
         assert_eq!(snapshot.primary_device.unwrap().battery, Some(79.0));
+    }
+
+    #[test]
+    fn all_recovery_attempts_fail_then_regular_polling_keeps_connected_and_last_battery() {
+        let transport = ScriptedTransport::new(vec![
+            mouse_reading(72.0), // last poll before sleep
+            mouse_asleep(),      // +3 s
+            mouse_asleep(),      // +10 s
+            mouse_asleep(),      // +20 s
+            mouse_reading(71.0), // next regular 60 s poll
+        ]);
+        let mut core = CoreService::new(transport);
+        core.refresh();
+
+        let mut recovery = ResumeRecovery::default();
+        recovery.on_resume(7);
+
+        let ticks = RecoveryTick::series(7);
+        assert_eq!(
+            drive_tick(&mut recovery, &mut core, ticks[0]),
+            Some(RecoveryOutcome::Pending)
+        );
+        assert_eq!(
+            drive_tick(&mut recovery, &mut core, ticks[1]),
+            Some(RecoveryOutcome::Pending)
+        );
+        assert_eq!(
+            drive_tick(&mut recovery, &mut core, ticks[2]),
+            Some(RecoveryOutcome::Exhausted)
+        );
+        assert!(!recovery.is_active());
+
+        let after_recovery = core.frontend_snapshot();
+        let primary = after_recovery.primary_device.expect("mouse stays known");
+        assert!(primary.connected);
+        assert_eq!(primary.battery, Some(72.0));
+        assert!(!after_recovery.transport_healthy);
+
+        // The regular poll is not part of the recovery set.
+        core.refresh();
+        let regular = core.frontend_snapshot();
+        assert_eq!(recovery.on_update(&regular), RecoveryOutcome::Idle);
+        assert_eq!(regular.primary_device.unwrap().battery, Some(71.0));
+    }
+
+    #[test]
+    fn a_later_resume_replaces_the_set_and_drops_stale_ticks() {
+        let mut recovery = ResumeRecovery::default();
+
+        recovery.on_resume(1);
+        let first = RecoveryTick::series(1);
+        assert!(recovery.on_tick(first[0]));
+
+        // Not deduplicated by the 4 s power filter (e.g. a second wake much later).
+        recovery.on_resume(2);
+        let second = RecoveryTick::series(2);
+        assert!(!recovery.on_tick(first[1]));
+        assert!(!recovery.on_tick(first[2]));
+        assert!(recovery.on_tick(second[0]));
+        assert!(recovery.is_active());
+    }
+
+    #[test]
+    fn ticks_without_a_resume_never_refresh() {
+        let mut recovery = ResumeRecovery::default();
+        assert!(!recovery.on_tick(RecoveryTick::series(1)[0]));
     }
 }

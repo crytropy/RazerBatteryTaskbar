@@ -9,7 +9,6 @@ mod settings_menu;
 mod startup;
 
 use std::error::Error;
-use std::thread;
 use std::time::Duration;
 
 use api::SharedIntegrationState;
@@ -26,6 +25,7 @@ use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
 #[cfg(windows)]
 use razer_core::windows_hid::ExperimentalDeathAdderTransport;
+use resume_recovery::{RecoveryOutcome, RecoveryTick, ResumeRecovery};
 use settings_menu::SettingsMenu;
 use single_instance::SingleInstance;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
@@ -42,7 +42,10 @@ const MIN_EXPERIMENTAL_POLL_SECONDS: u64 = 60;
 enum UserEvent {
     Menu(MenuEvent),
     Core(CoreUpdate),
-    PowerResume,
+    /// Windows resumed; the payload is the recovery generation for this wake.
+    PowerResume(u64),
+    /// A scheduled post-resume recovery refresh is due.
+    RecoveryTick(RecoveryTick),
 }
 
 struct PlaceholderTransport;
@@ -100,6 +103,7 @@ struct TrayApplication {
     settings: AppSettings,
     integration_state: SharedIntegrationState,
     last_snapshot: Option<FrontendSnapshot>,
+    resume_recovery: ResumeRecovery,
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
     settings_menu: Option<SettingsMenu>,
@@ -122,6 +126,7 @@ impl TrayApplication {
             settings,
             integration_state,
             last_snapshot: None,
+            resume_recovery: ResumeRecovery::default(),
             tray: None,
             status_item: None,
             settings_menu: None,
@@ -371,8 +376,18 @@ impl ApplicationHandler<UserEvent> for TrayApplication {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Menu(event) => self.handle_menu(event_loop, event),
-            UserEvent::Core(update) => self.apply_core_update(update),
-            UserEvent::PowerResume => self.refresh(),
+            UserEvent::Core(update) => {
+                if self.resume_recovery.on_update(&update.snapshot) == RecoveryOutcome::Exhausted {
+                    eprintln!("post-resume recovery refreshes failed; regular polling continues");
+                }
+                self.apply_core_update(update);
+            }
+            UserEvent::PowerResume(generation) => self.resume_recovery.on_resume(generation),
+            UserEvent::RecoveryTick(tick) => {
+                if self.resume_recovery.on_tick(tick) {
+                    self.refresh();
+                }
+            }
         }
     }
 
@@ -612,21 +627,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
 
     // Windows sends an automatic resume event, often followed by a second
-    // user-resume event. The power callback deduplicates the pair.
-    // Retry once after the receiver's USB/HID interface has had time to recover.
+    // user-resume event. The power callback deduplicates the pair. The
+    // receiver needs several seconds to re-pair with the mouse, so recovery
+    // refreshes are staggered (see `resume_recovery`) and stop at the first
+    // real battery read.
     #[cfg(windows)]
     let _power_notifications = {
         let resume_proxy = event_loop.create_proxy();
         match PowerNotifications::register(move || {
-            let _ = resume_proxy.send_event(UserEvent::PowerResume);
+            let generation = resume_recovery::next_generation();
+            let _ = resume_proxy.send_event(UserEvent::PowerResume(generation));
 
-            let retry_proxy = resume_proxy.clone();
-            let _ = thread::Builder::new()
-                .name("razer-resume-retry".to_string())
-                .spawn(move || {
-                    thread::sleep(Duration::from_secs(3));
-                    let _ = retry_proxy.send_event(UserEvent::PowerResume);
-                });
+            let tick_proxy = resume_proxy.clone();
+            resume_recovery::spawn_ticks(generation, move |tick| {
+                let _ = tick_proxy.send_event(UserEvent::RecoveryTick(tick));
+            });
         }) {
             Ok(registration) => Some(registration),
             Err(error) => {
