@@ -166,16 +166,33 @@ visually distinct from a real 0% reading. This is a tray-only change:
 it does not modify HID polling, device connectivity, the read-only API,
 or the `transportHealthy` / `transportReady` status fields.
 
+### Icon colour
+
+The battery fill is coloured by state, using the same thresholds as the
+Seelen toolbar plugin (`integrations/seelen-ui/plugin/template.js`):
+
+| State | Fill colour |
+| --- | --- |
+| Charging (`charging=true`), any level | Green `#52c41a` |
+| Battery below 20 % | Red `#ff4d4f` |
+| Battery below 50 % | Orange `#fa8c16` |
+| Battery 50 % and above | White |
+| Battery unknown | White question mark (unchanged) |
+
+Charging wins over the battery thresholds. The outline is always light
+grey; only the fill (and the charging bolt over the empty part of the
+cell) changes colour.
+
 ### Charging display
 
 When the primary device reports `charging=true`, the tray draws a small
 lightning bolt inside the battery cell. The bolt is inverted against the
-fill (dark over the white filled part, white over the empty part) so it
+fill (dark over the green filled part, green over the empty part) so it
 stays legible at 16×16 at every battery level. If the battery level is
 unknown while charging, the bolt replaces the question mark and is drawn
-slightly dimmed, so "charging, level unknown" is still distinct from
-"charging, 0%". When `charging` is `false` or `null` the icon is identical
-to the non-charging icon described above.
+in a dimmed green, so "charging, level unknown" is still distinct from
+"charging, 0%". When `charging` is `false` or `null` the icon follows the
+battery colour rules above.
 
 The tooltip and the status menu item append ` — Charging` to the existing
 status string, for example `Razer DeathAdder V3 Pro — 64.0% — Charging`
