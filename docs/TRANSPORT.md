@@ -42,9 +42,20 @@ Before the Rust migration is finalized, HIDAPI / native Windows HID access shoul
 
 ## Final transport choice
 
-The Rust core's production Windows transport is native HID feature reports through `hidapi` (windows-native backend), opening the device's HID collection for one query at a time. The decision, the rejected alternatives (libusb / WinUSB), the hardware evidence, and the known limitations (Synapse coexistence unverified, single product ID until #18, 60 s minimum poll) are recorded in [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md). The Electron node-usb transport remains a legacy compatibility layer only.
+The Rust core's production Windows transport is native HID feature reports through `hidapi` (windows-native backend), opening the device's HID collection once per poll. The decision, the rejected alternatives (libusb / WinUSB), the hardware evidence, and the known limitations (Synapse coexistence unverified, single product ID until #18, 60 s minimum poll) are recorded in [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md). The Electron node-usb transport remains a legacy compatibility layer only.
 
 Phase 7 is complete. Remaining items are tracked as follow-ups: #8 (make the HID transport the default), #12 / #13 (reconnect latency), #16 (hibernate retest), #18 (wired PID).
+
+### Two feature queries per poll
+
+Each poll opens the HID collection once and sends two 90-byte power-class (`0x07`) requests on that handle, each followed by the same reply delay and the same reply validation (report ID, Razer status byte, transaction ID, command, checksum):
+
+1. battery level, command `0x80` (reply byte 9 is the level out of 255);
+2. charging status, command `0x84` (reply byte 9 is `0x01` charging / `0x00` not charging).
+
+The charging query is best effort. It is only sent after the battery reply was accepted, and if it fails, is rejected, or comes back as `deviceNotResponding`, the battery result stands and `charging` is reported as `null`; the charging query alone never produces a transport error or disconnects the device. While the mouse is asleep the battery query itself returns `deviceNotResponding`, so the last battery *and* charging values are retained together, exactly as before. A poll therefore takes roughly twice the previous reply delay (about 1 s).
+
+Known limitation: a DeathAdder V3 Pro charging over its USB cable re-enumerates as the wired product ID `00B6`, which this transport does not match yet, so cable charging is not observed until #18 adds the wired PID. The `charging` flag currently reflects what the wireless PID `00B7` reports.
 
 ## Phase 7 exit criteria
 

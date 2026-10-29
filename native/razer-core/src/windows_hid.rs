@@ -1,12 +1,13 @@
 use std::thread;
 use std::time::Duration;
 
-use hidapi::HidApi;
+use hidapi::{HidApi, HidDevice};
 
 use crate::RAZER_VENDOR_ID;
 use crate::device_db::get_product;
 use crate::protocol::{
-    CRC_OFFSET, REPORT_SIZE, build_battery_request, calculate_crc, parse_battery_level,
+    CHARGING_STATUS_COMMAND, CRC_OFFSET, REPORT_SIZE, build_battery_request,
+    build_charging_request, calculate_crc, parse_battery_level, parse_charging_status,
 };
 use crate::state::DeviceReading;
 use crate::transport::{BatteryTransport, TransportError, TransportErrorKind};
@@ -72,7 +73,13 @@ pub fn classify_status(status: u8) -> TransportError {
     }
 }
 
-pub fn parse_feature_reply(bytes: &[u8], transaction_id: u8) -> Result<f32, TransportError> {
+/// Validate the framing shared by every power-class reply (report id, status,
+/// transaction id, command, checksum) and return the bare 90-byte report.
+fn validate_feature_reply(
+    bytes: &[u8],
+    transaction_id: u8,
+    command: u8,
+) -> Result<[u8; REPORT_SIZE], TransportError> {
     if bytes.len() < REPORT_SIZE + 1 {
         return Err(TransportError::with_kind(
             TransportErrorKind::InvalidResponse,
@@ -101,7 +108,7 @@ pub fn parse_feature_reply(bytes: &[u8], transaction_id: u8) -> Result<f32, Tran
         ));
     }
 
-    if report[6] != COMMAND_CLASS || report[7] != COMMAND_ID {
+    if report[6] != COMMAND_CLASS || report[7] != command {
         return Err(TransportError::with_kind(
             TransportErrorKind::InvalidResponse,
             "Razer response command mismatch",
@@ -115,12 +122,57 @@ pub fn parse_feature_reply(bytes: &[u8], transaction_id: u8) -> Result<f32, Tran
         ));
     }
 
+    Ok(report)
+}
+
+/// Parse a validated battery level reply into a percentage.
+pub fn parse_feature_reply(bytes: &[u8], transaction_id: u8) -> Result<f32, TransportError> {
+    let report = validate_feature_reply(bytes, transaction_id, COMMAND_ID)?;
+
     parse_battery_level(&report).map_err(|_| {
         TransportError::with_kind(
             TransportErrorKind::InvalidResponse,
             "battery level unavailable",
         )
     })
+}
+
+/// Parse a validated charging status reply (`0x01` charging, `0x00` not).
+pub fn parse_charging_reply(bytes: &[u8], transaction_id: u8) -> Result<bool, TransportError> {
+    let report = validate_feature_reply(bytes, transaction_id, CHARGING_STATUS_COMMAND)?;
+
+    parse_charging_status(&report).map_err(|error| {
+        TransportError::with_kind(TransportErrorKind::InvalidResponse, error.to_string())
+    })
+}
+
+/// Send one 90-byte request as a feature report, wait for the device, and
+/// read back the reply (report id included). `what` names the query in errors.
+fn query_feature(
+    device: &HidDevice,
+    request: &[u8; REPORT_SIZE],
+    what: &str,
+) -> Result<Vec<u8>, TransportError> {
+    let mut feature_request = [0u8; REPORT_SIZE + 1];
+    feature_request[1..].copy_from_slice(request);
+
+    device.send_feature_report(&feature_request).map_err(|_| {
+        TransportError::with_kind(
+            TransportErrorKind::Send,
+            format!("Razer {what} query could not be sent"),
+        )
+    })?;
+    thread::sleep(RESPONSE_DELAY);
+
+    let mut reply = [0u8; REPORT_SIZE + 1];
+    let received = device.get_feature_report(&mut reply).map_err(|_| {
+        TransportError::with_kind(
+            TransportErrorKind::Receive,
+            format!("Razer {what} response could not be read"),
+        )
+    })?;
+
+    Ok(reply[..received].to_vec())
 }
 
 impl BatteryTransport for ExperimentalDeathAdderTransport {
@@ -169,27 +221,22 @@ impl BatteryTransport for ExperimentalDeathAdderTransport {
             )
         })?;
 
-        let request = build_battery_request(product.transaction_id);
-        let mut feature_request = [0u8; REPORT_SIZE + 1];
-        feature_request[1..].copy_from_slice(&request);
+        let transaction_id = product.transaction_id;
+        let battery_reply =
+            query_feature(&device, &build_battery_request(transaction_id), "battery")?;
+        let battery = parse_feature_reply(&battery_reply, transaction_id)?;
 
-        device.send_feature_report(&feature_request).map_err(|_| {
-            TransportError::with_kind(
-                TransportErrorKind::Send,
-                "Razer battery query could not be sent",
-            )
-        })?;
-        thread::sleep(RESPONSE_DELAY);
-
-        let mut reply = [0u8; REPORT_SIZE + 1];
-        let received = device.get_feature_report(&mut reply).map_err(|_| {
-            TransportError::with_kind(
-                TransportErrorKind::Receive,
-                "Razer battery response could not be read",
-            )
-        })?;
-
-        let battery = parse_feature_reply(&reply[..received], product.transaction_id)?;
+        // The charging query reuses the open handle. It is best effort: a
+        // failed or unanswered charging query leaves the verified battery
+        // reading intact and only reports the charging state as unknown. It
+        // must never turn into a transport error on its own.
+        let charging = query_feature(
+            &device,
+            &build_charging_request(transaction_id),
+            "charging status",
+        )
+        .and_then(|reply| parse_charging_reply(&reply, transaction_id))
+        .ok();
 
         Ok(vec![DeviceReading {
             vendor_id: RAZER_VENDOR_ID,
@@ -197,7 +244,7 @@ impl BatteryTransport for ExperimentalDeathAdderTransport {
             product_name: Some(product.name.clone()),
             device_type: product.device_type,
             battery: Some(battery),
-            charging: None,
+            charging,
             serial_number: None,
         }])
     }
@@ -207,19 +254,61 @@ impl BatteryTransport for ExperimentalDeathAdderTransport {
 mod tests {
     use super::*;
 
-    fn reply(transaction_id: u8, battery: u8) -> [u8; REPORT_SIZE + 1] {
+    fn command_reply(transaction_id: u8, command: u8, payload: u8) -> [u8; REPORT_SIZE + 1] {
         let mut report = [0u8; REPORT_SIZE];
         report[0] = SUCCESS_STATUS;
         report[1] = transaction_id;
         report[5] = 0x02;
         report[6] = COMMAND_CLASS;
-        report[7] = COMMAND_ID;
-        report[9] = battery;
+        report[7] = command;
+        report[9] = payload;
         report[CRC_OFFSET] = calculate_crc(&report);
 
         let mut bytes = [0u8; REPORT_SIZE + 1];
         bytes[1..].copy_from_slice(&report);
         bytes
+    }
+
+    fn reply(transaction_id: u8, battery: u8) -> [u8; REPORT_SIZE + 1] {
+        command_reply(transaction_id, COMMAND_ID, battery)
+    }
+
+    #[test]
+    fn charging_reply_is_validated_like_the_battery_reply() {
+        let charging = command_reply(0x1f, CHARGING_STATUS_COMMAND, 0x01);
+        assert_eq!(parse_charging_reply(&charging, 0x1f), Ok(true));
+
+        let idle = command_reply(0x1f, CHARGING_STATUS_COMMAND, 0x00);
+        assert_eq!(parse_charging_reply(&idle, 0x1f), Ok(false));
+
+        let garbage = command_reply(0x1f, CHARGING_STATUS_COMMAND, 0x7f);
+        let error = parse_charging_reply(&garbage, 0x1f).unwrap_err();
+        assert_eq!(error.kind, TransportErrorKind::InvalidResponse);
+
+        // A battery reply must not be mistaken for a charging reply and vice versa.
+        let battery = reply(0x1f, 0x01);
+        assert_eq!(
+            parse_charging_reply(&battery, 0x1f).unwrap_err().kind,
+            TransportErrorKind::InvalidResponse
+        );
+        assert_eq!(
+            parse_feature_reply(&charging, 0x1f).unwrap_err().kind,
+            TransportErrorKind::InvalidResponse
+        );
+
+        let mismatch = parse_charging_reply(&charging, 0x3f).unwrap_err();
+        assert_eq!(mismatch.kind, TransportErrorKind::InvalidResponse);
+
+        let mut corrupt = charging;
+        corrupt[10] = 44;
+        assert!(parse_charging_reply(&corrupt, 0x1f).is_err());
+
+        let mut asleep = charging;
+        asleep[1] = STATUS_FAILURE;
+        assert_eq!(
+            parse_charging_reply(&asleep, 0x1f).unwrap_err().kind,
+            TransportErrorKind::DeviceNotResponding
+        );
     }
 
     #[test]

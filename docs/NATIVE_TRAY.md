@@ -116,6 +116,33 @@ visually distinct from a real 0% reading. This is a tray-only change:
 it does not modify HID polling, device connectivity, the read-only API,
 or the `transportHealthy` / `transportReady` status fields.
 
+### Charging display
+
+When the primary device reports `charging=true`, the tray draws a small
+lightning bolt inside the battery cell. The bolt is inverted against the
+fill (dark over the white filled part, white over the empty part) so it
+stays legible at 16×16 at every battery level. If the battery level is
+unknown while charging, the bolt replaces the question mark and is drawn
+slightly dimmed, so "charging, level unknown" is still distinct from
+"charging, 0%". When `charging` is `false` or `null` the icon is identical
+to the non-charging icon described above.
+
+The tooltip and the status menu item append ` — Charging` to the existing
+status string, for example `Razer Deathadder V3 Pro Wireless — 64.0% — Charging`
+or `Razer Deathadder V3 Pro Wireless — Battery unavailable — Charging`.
+Charging-state changes never trigger low-battery notifications
+(see [SETTINGS.md](SETTINGS.md)). The tray never parses the Razer
+protocol: it only renders the `charging` field of the frontend snapshot,
+which the Windows HID transport fills from a second feature query per poll
+(see [TRANSPORT.md](TRANSPORT.md)).
+
+Known limitation: a DeathAdder V3 Pro charging over its cable enumerates as
+the wired product ID `00B6`, which the transport does not read yet
+(ticket #18). Until then, plugging the cable in makes the wireless PID
+`00B7` disappear from enumeration, so the tray reports the mouse as
+disconnected rather than charging; the charging mark can only appear while
+the device is still enumerated as `00B7`.
+
 The worker is tested with a fake transport, without touching real hardware.
 Long-term HID reliability, physical reconnect behavior, and Windows sleep
 recovery still require real-device validation.
@@ -141,8 +168,10 @@ Experimental mode uses `windows-hid-00b7-experimental`, attempts only this
 specific product/interface/usage combination, and sends a battery query on
 launch and at intervals of **at least 60 seconds**. The 5/15/30-second
 poll options are disabled while it is active; the minimum is enforced
-regardless of earlier saved settings. It opens a handle for a single query
-then releases it, and does not change the Windows driver or mouse settings.
+regardless of earlier saved settings. It opens a handle once per poll,
+sends the battery query followed by the charging-status query on that
+handle, then releases it, and does not change the Windows driver or mouse
+settings.
 
 It will stop reporting a stale reading when transport health fails,
 and will mark the device disconnected after the core's existing three-failure

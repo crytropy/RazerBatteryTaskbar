@@ -149,7 +149,7 @@ impl TrayApplication {
 
         let tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_icon(build_battery_icon(None)?)
+            .with_icon(build_battery_icon(None, false)?)
             .with_tooltip("RazerBatteryTaskbar Native")
             .build()?;
 
@@ -194,16 +194,17 @@ impl TrayApplication {
 
         if let Some(tray) = &self.tray {
             let _ = tray.set_tooltip(Some(&status));
-            let battery = if snapshot.transport_healthy && snapshot.transport_ready {
-                snapshot
-                    .primary_device
-                    .as_ref()
-                    .and_then(|device| device.battery)
+            let (battery, charging) = if snapshot.transport_healthy && snapshot.transport_ready {
+                let device = snapshot.primary_device.as_ref();
+                (
+                    device.and_then(|device| device.battery),
+                    device.and_then(|device| device.charging) == Some(true),
+                )
             } else {
-                None
+                (None, false)
             };
             let _ = tray.set_icon(Some(
-                build_battery_icon(battery).expect("generated tray icon must be valid"),
+                build_battery_icon(battery, charging).expect("generated tray icon must be valid"),
             ));
         }
     }
@@ -484,28 +485,49 @@ fn format_status(snapshot: &FrontendSnapshot) -> String {
     }
 
     match snapshot.primary_device.as_ref() {
-        Some(device) if device.connected => match device.battery {
-            Some(battery) => format!(
-                "{} — {battery:.1}%",
-                device.name.as_deref().unwrap_or("Razer device")
-            ),
-            None => format!(
-                "{} — Battery unavailable",
-                device.name.as_deref().unwrap_or("Razer device")
-            ),
-        },
+        Some(device) if device.connected => {
+            let name = device.name.as_deref().unwrap_or("Razer device");
+            let charging = if device.charging == Some(true) {
+                " — Charging"
+            } else {
+                ""
+            };
+            match device.battery {
+                Some(battery) => format!("{name} — {battery:.1}%{charging}"),
+                None => format!("{name} — Battery unavailable{charging}"),
+            }
+        }
         _ => "No supported Razer devices detected".to_string(),
     }
 }
 
-fn build_battery_icon(battery: Option<f32>) -> Result<Icon, tray_icon::BadIcon> {
+fn build_battery_icon(battery: Option<f32>, charging: bool) -> Result<Icon, tray_icon::BadIcon> {
     const WIDTH: u32 = 16;
     const HEIGHT: u32 = 16;
 
-    Icon::from_rgba(battery_icon_rgba(battery), WIDTH, HEIGHT)
+    Icon::from_rgba(battery_icon_rgba(battery, charging), WIDTH, HEIGHT)
 }
 
-fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
+/// Lightning bolt drawn inside the battery cell while charging, as
+/// (x, y) pixels. It spans the interior rows 5..=10 and columns 5..=8.
+const CHARGING_BOLT_PIXELS: [(u32, u32); 14] = [
+    (7, 5),
+    (8, 5),
+    (6, 6),
+    (7, 6),
+    (5, 7),
+    (6, 7),
+    (7, 7),
+    (8, 7),
+    (7, 8),
+    (8, 8),
+    (6, 9),
+    (7, 9),
+    (5, 10),
+    (6, 10),
+];
+
+fn battery_icon_rgba(battery: Option<f32>, charging: bool) -> Vec<u8> {
     const WIDTH: u32 = 16;
     const HEIGHT: u32 = 16;
 
@@ -545,6 +567,9 @@ fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
                 }
             }
         }
+        // While charging the bolt replaces the unknown marker; a dimmed bolt
+        // in an empty cell is the charging-with-unknown-battery state.
+        None if charging => {}
         None => {
             // Unknown is not zero: draw a small question mark inside the empty cell.
             for (x, y) in [
@@ -559,6 +584,16 @@ fn battery_icon_rgba(battery: Option<f32>) -> Vec<u8> {
             ] {
                 set_pixel(x, y, 255);
             }
+        }
+    }
+
+    if charging {
+        // Invert the bolt against whatever is underneath so it stays legible
+        // over the white fill as well as over the empty (transparent) cell.
+        let unfilled_value = if battery.is_some() { 255 } else { 200 };
+        for (x, y) in CHARGING_BOLT_PIXELS {
+            let filled = fill_width.is_some_and(|fill_width| x < 3 + fill_width);
+            set_pixel(x, y, if filled { 0 } else { unfilled_value });
         }
     }
 
@@ -681,6 +716,80 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use razer_core::frontend::FrontendDeviceState;
+    use razer_core::state::DeviceType;
+
+    fn healthy_snapshot(battery: Option<f32>, charging: Option<bool>) -> FrontendSnapshot {
+        let device = FrontendDeviceState {
+            vendor_id: 0x1532,
+            product_id: 0x00B7,
+            name: Some("Razer Deathadder V3 Pro Wireless".to_string()),
+            device_type: DeviceType::Mouse,
+            battery,
+            charging,
+            connected: true,
+        };
+        FrontendSnapshot {
+            devices: vec![device.clone()],
+            primary_device: Some(device),
+            transport_name: "windows-hid-00b7-experimental".to_string(),
+            transport_ready: true,
+            transport_healthy: true,
+            consecutive_transport_failures: 0,
+            transport_error_kind: None,
+            poll_statistics: PollStatistics::default(),
+        }
+    }
+
+    #[test]
+    fn status_text_appends_charging_in_the_existing_format() {
+        assert_eq!(
+            format_status(&healthy_snapshot(Some(64.0), Some(true))),
+            "Razer Deathadder V3 Pro Wireless — 64.0% — Charging"
+        );
+        assert_eq!(
+            format_status(&healthy_snapshot(None, Some(true))),
+            "Razer Deathadder V3 Pro Wireless — Battery unavailable — Charging"
+        );
+        assert_eq!(
+            format_status(&healthy_snapshot(Some(64.0), Some(false))),
+            "Razer Deathadder V3 Pro Wireless — 64.0%"
+        );
+        assert_eq!(
+            format_status(&healthy_snapshot(Some(64.0), None)),
+            "Razer Deathadder V3 Pro Wireless — 64.0%"
+        );
+    }
+
+    #[test]
+    fn charging_icon_differs_from_non_charging_icon_at_every_battery_level() {
+        for level in [0.0, 37.0, 50.0, 100.0] {
+            assert!(build_battery_icon(Some(level), true).is_ok());
+            assert_ne!(
+                battery_icon_rgba(Some(level), true),
+                battery_icon_rgba(Some(level), false),
+                "charging mark missing at {level}%"
+            );
+        }
+        // Not charging and unknown charging render the same icon as before.
+        assert_eq!(
+            battery_icon_rgba(Some(50.0), false).len(),
+            (16 * 16 * 4) as usize
+        );
+    }
+
+    #[test]
+    fn charging_icon_renders_with_unknown_battery() {
+        assert!(build_battery_icon(None, true).is_ok());
+        assert_ne!(
+            battery_icon_rgba(None, true),
+            battery_icon_rgba(None, false)
+        );
+        assert_ne!(
+            battery_icon_rgba(None, true),
+            battery_icon_rgba(Some(0.0), true)
+        );
+    }
 
     #[test]
     fn native_shell_status_is_explicit_about_pending_hid_transport() {
@@ -720,19 +829,28 @@ mod tests {
 
     #[test]
     fn generated_icons_are_valid_at_extreme_battery_levels() {
-        assert!(build_battery_icon(Some(0.0)).is_ok());
-        assert!(build_battery_icon(Some(100.0)).is_ok());
-        assert!(build_battery_icon(None).is_ok());
+        assert!(build_battery_icon(Some(0.0), false).is_ok());
+        assert!(build_battery_icon(Some(100.0), false).is_ok());
+        assert!(build_battery_icon(None, false).is_ok());
     }
 
     #[test]
     fn unknown_battery_icon_is_distinct_from_empty_battery() {
-        assert_ne!(battery_icon_rgba(None), battery_icon_rgba(Some(0.0)));
-        assert_ne!(battery_icon_rgba(None), battery_icon_rgba(Some(100.0)));
-        assert_eq!(battery_icon_rgba(Some(0.0)), battery_icon_rgba(Some(-10.0)));
+        assert_ne!(
+            battery_icon_rgba(None, false),
+            battery_icon_rgba(Some(0.0), false)
+        );
+        assert_ne!(
+            battery_icon_rgba(None, false),
+            battery_icon_rgba(Some(100.0), false)
+        );
         assert_eq!(
-            battery_icon_rgba(Some(100.0)),
-            battery_icon_rgba(Some(110.0))
+            battery_icon_rgba(Some(0.0), false),
+            battery_icon_rgba(Some(-10.0), false)
+        );
+        assert_eq!(
+            battery_icon_rgba(Some(100.0), false),
+            battery_icon_rgba(Some(110.0), false)
         );
     }
 }
