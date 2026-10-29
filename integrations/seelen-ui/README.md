@@ -23,7 +23,7 @@ Seelen Fancy Toolbar remoteData → JSON.parse inside the plugin scripts
 
 The plugin fetches the **cached status API every 5 seconds**. This does **not**
 trigger an HID query every 5 seconds: the native app retains its configured
-polling interval (10 seconds to 5 minutes, 60 by default), plus the
+fixed 10-second polling interval, plus the
 existing resume-triggered recovery polls.
 
 ## Local setup and verification

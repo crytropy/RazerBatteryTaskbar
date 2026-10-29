@@ -14,7 +14,7 @@ The native tray owns Windows/UI concerns only:
 
 - Win32-compatible event loop through winit;
 - system tray icon and menu through tray-icon;
-- a dedicated battery-reading worker with runtime-adjustable polling interval;
+- a dedicated battery-reading worker polling at a fixed 10 s interval;
 - tray Settings submenu for polling and notification thresholds;
 - tray Primary device submenu that picks which connected device the icon shows;
 - frontend-safe core snapshots;
@@ -44,12 +44,9 @@ The Settings submenu contains:
 - Send test notification;
 - Low battery threshold;
 - Critical battery threshold;
-- Polling interval;
 - Start with Windows.
 
-Changing the polling interval updates the active core worker immediately. It does not start another USB/HID thread and does not require an application restart.
-
-The polling interval menu offers 10 seconds, 30 seconds, 1 minute (default) and 5 minutes. The 10-second minimum is a property of the Windows HID transport: one poll opens the handle once and spends about 1.2 s on its two queries (ADR-0001), so 10 s is the shortest interval that keeps the handle mostly idle. Choose 10 or 30 seconds when you want the charging state and colour to follow the cable within a few seconds: plugging or unplugging the charging cable while the receiver is connected produces no USB device event, so only the next poll can notice it. A `settings.json` with a shorter interval is raised to 10 seconds at startup and saved back.
+There is no polling interval setting: the tray polls every 10 seconds. One poll opens the HID handle once and spends about 1.2 s on its two queries (ADR-0001), so 10 s keeps the handle idle most of the time, and it is what lets the charging state and icon colour follow the cable within seconds (plugging or unplugging the charging cable while the receiver is connected produces no USB device event, so only the next poll can notice it). A `settings.json` with another `pollIntervalSeconds` is rewritten to 10 at startup.
 
 Threshold changes are validated before persistence. Critical-battery choices above the selected low-battery threshold are disabled.
 
@@ -234,7 +231,7 @@ Start it from PowerShell with no arguments:
 ```
 
 The transport sends a battery query on launch and then at intervals of
-**at least 10 seconds** (60 seconds by default). It opens a handle once per poll, sends the battery
+**every 10 seconds**. It opens a handle once per poll, sends the battery
 query followed by the charging-status query on that handle, then releases
 it, and does not change the Windows driver or mouse settings. With no
 matching receiver attached, reads succeed with an empty device list and the
@@ -281,7 +278,7 @@ The power callback and the timer thread never open an HID handle and never
 block the UI event loop; they only post events to it, and the refreshes run
 on the background battery worker like every other read. If power
 notification registration fails, normal scheduled polling remains available
-as a fallback. The configured polling interval (10 s minimum, 60 s default) remains
+as a fallback. The fixed 10 s polling interval remains
 unchanged for ordinary polling; recovery refreshes are only sent after an
 actual Windows resume event.
 

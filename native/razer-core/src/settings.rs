@@ -8,10 +8,10 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 pub const SETTINGS_VERSION: u32 = 1;
-/// 60 s has been the effective default of the native tray since the HID
-/// transport became the default (the tray used to clamp this value up to 60);
-/// keep it so lowering the tray minimum does not change existing behaviour.
-pub const DEFAULT_POLL_INTERVAL_SECONDS: u64 = 60;
+/// The native tray polls at this fixed interval (it rewrites any other saved
+/// value, see razer-tray `POLL_INTERVAL_SECONDS`). The core itself still
+/// accepts the full 5–3600 s range for other frontends.
+pub const DEFAULT_POLL_INTERVAL_SECONDS: u64 = 10;
 pub const MIN_POLL_INTERVAL_SECONDS: u64 = 5;
 pub const MAX_POLL_INTERVAL_SECONDS: u64 = 3600;
 
