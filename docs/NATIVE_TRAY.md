@@ -16,6 +16,7 @@ The native tray owns Windows/UI concerns only:
 - system tray icon and menu through tray-icon;
 - a dedicated battery-reading worker with runtime-adjustable polling interval;
 - tray Settings submenu for polling and notification thresholds;
+- tray Primary device submenu that picks which connected device the icon shows;
 - frontend-safe core snapshots;
 - Windows desktop notification delivery through notify-rust;
 - persistent Notifications on/off toggle;
@@ -26,6 +27,16 @@ The native tray owns Windows/UI concerns only:
 It does not parse Razer packets, enumerate HID collections, or know device serial numbers.
 
 ## Tray settings
+
+### Primary device
+
+The right-click menu has a `Primary device` submenu directly under the status line. It lists `Automatic` plus one entry per currently connected Razer device, named from the device database; the active choice is checked. With one device attached the submenu still shows that single device. The entries are rebuilt from every core snapshot, so a device that is plugged in appears on the next poll or device-change rescan and an unplugged device disappears.
+
+Picking a device sends the preference to the running worker, which answers with a snapshot built from the devices it already knows; the icon, tooltip and `/v1/status` switch at once and no extra HID handle is opened. The choice is stored as `primaryDevice` in `settings.json` (see [SETTINGS.md](SETTINGS.md)) and applied again at the next start.
+
+The preference is keyed on the Razer product ID. When the preferred device is unplugged the core falls back to its default ordering (Mouse → Headset → Dock → Dongle → Unknown); the submenu keeps the preferred device visible as a disabled, checked `… (disconnected)` entry so the fallback is explicit, and the preference takes over again as soon as the device reconnects. `Automatic` returns to the default ordering.
+
+### Settings
 
 The Settings submenu contains:
 
@@ -73,7 +84,7 @@ Runtime verification (October 2026, DeathAdder V3 Pro, HID transport enabled wit
 1. Collect HID Probe reports from real Razer hardware while Synapse is running.
 2. Validate Synapse coexistence with the default HID transport (known limitation in ADR-0001).
 3. Generalise the transport beyond the `00B7` receiver (#18).
-4. Add a primary-device selection menu when real devices are available.
+4. ~~Add a primary-device selection menu when real devices are available.~~ Done in #9 (`Primary device` submenu); multi-device behaviour still needs a second supported device to verify on hardware.
 
 
 ## Release flow and CI artifacts

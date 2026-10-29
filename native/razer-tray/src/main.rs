@@ -6,6 +6,7 @@ mod device_events;
 mod polling;
 #[cfg(windows)]
 mod power_events;
+mod primary_device_menu;
 mod resume_recovery;
 mod settings_menu;
 mod startup;
@@ -20,11 +21,12 @@ use notify_rust::{Notification, Urgency};
 use polling::{CoreUpdate, CoreWorker};
 #[cfg(windows)]
 use power_events::PowerNotifications;
+use primary_device_menu::PrimaryDeviceMenu;
 use razer_core::frontend::FrontendSnapshot;
 #[cfg(test)]
 use razer_core::frontend::PollStatistics;
 use razer_core::notifications::{NotificationKind, NotificationRequest};
-use razer_core::settings::{AppSettings, SettingsStore};
+use razer_core::settings::{AppSettings, PrimaryDevicePreference, SettingsStore};
 use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
 #[cfg(windows)]
@@ -179,6 +181,7 @@ struct TrayApplication {
     resume_recovery: ResumeRecovery,
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
+    primary_device_menu: Option<PrimaryDeviceMenu>,
     settings_menu: Option<SettingsMenu>,
     refresh_item: Option<MenuItem>,
     quit_item: Option<MenuItem>,
@@ -200,6 +203,7 @@ impl TrayApplication {
             resume_recovery: ResumeRecovery::default(),
             tray: None,
             status_item: None,
+            primary_device_menu: None,
             settings_menu: None,
             refresh_item: None,
             quit_item: None,
@@ -209,11 +213,13 @@ impl TrayApplication {
     fn create_tray(&mut self) -> Result<(), Box<dyn Error>> {
         let menu = Menu::new();
         let status_item = MenuItem::new("Starting native core…", false, None);
+        let primary_device_menu = PrimaryDeviceMenu::new(&self.settings.primary_device)?;
         let settings_menu = SettingsMenu::new(&self.settings)?;
         let refresh_item = MenuItem::with_id("refresh", "Refresh", true, None);
         let quit_item = MenuItem::with_id("quit", "Quit", true, None);
 
         menu.append(&status_item)?;
+        menu.append(&primary_device_menu.root)?;
         menu.append(&settings_menu.root)?;
         menu.append(&refresh_item)?;
         menu.append(&quit_item)?;
@@ -226,6 +232,7 @@ impl TrayApplication {
 
         self.tray = Some(tray);
         self.status_item = Some(status_item);
+        self.primary_device_menu = Some(primary_device_menu);
         self.settings_menu = Some(settings_menu);
         self.refresh_item = Some(refresh_item);
         self.quit_item = Some(quit_item);
@@ -233,6 +240,7 @@ impl TrayApplication {
         if let Some(snapshot) = &self.last_snapshot {
             self.render(snapshot);
         }
+        self.sync_primary_device_menu();
 
         Ok(())
     }
@@ -254,6 +262,7 @@ impl TrayApplication {
 
         self.render(&update.snapshot);
         self.last_snapshot = Some(update.snapshot);
+        self.sync_primary_device_menu();
     }
 
     fn render(&self, snapshot: &FrontendSnapshot) {
@@ -292,6 +301,23 @@ impl TrayApplication {
         if let Some(menu) = &self.settings_menu {
             menu.sync(&self.settings);
         }
+    }
+
+    fn sync_primary_device_menu(&mut self) {
+        if let Some(menu) = &mut self.primary_device_menu {
+            menu.update(self.last_snapshot.as_ref(), &self.settings.primary_device);
+        }
+    }
+
+    /// The core answers with a snapshot for the new primary device; the icon,
+    /// tooltip and `/v1/status` all follow from that same snapshot.
+    fn set_primary_device(&mut self, preference: PrimaryDevicePreference) {
+        self.settings.primary_device = preference.clone();
+        if !self.worker.set_primary_device(preference) {
+            eprintln!("battery worker could not update the primary device");
+        }
+        self.sync_primary_device_menu();
+        self.persist_settings("primary device");
     }
 
     fn sync_worker_notifications(&self) {
@@ -364,6 +390,15 @@ impl TrayApplication {
     }
 
     fn handle_menu(&mut self, event_loop: &ActiveEventLoop, event: MenuEvent) {
+        let primary_device = self
+            .primary_device_menu
+            .as_ref()
+            .and_then(|menu| menu.preference_for_event(&event));
+        if let Some(preference) = primary_device {
+            self.set_primary_device(preference);
+            return;
+        }
+
         let notifications_event = self
             .settings_menu
             .as_ref()
