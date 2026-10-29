@@ -62,7 +62,7 @@ Low battery uses normal urgency. Critical battery uses critical urgency. The not
 
 `Send test notification` bypasses the battery policy and notification-enabled setting on purpose. It sends one normal Windows notification so toast behavior can be verified without a real HID battery reading or waiting for a low-battery threshold.
 
-Windows toast and startup behavior still require real desktop runtime verification; CI verifies compilation and unit tests without changing the runner's startup registration.
+Runtime verification (October 2026, DeathAdder V3 Pro, `--experimental-hid-00b7`, thresholds low 20 % / critical 15 %; issue #6): the Windows toast fired once when the battery was already below the critical threshold at startup, did not repeat while the level stayed below the threshold, fired again after charging above the low threshold and discharging back below critical, and did not fire while the idle mouse was in `deviceNotResponding` with its last battery value retained. CI still verifies only compilation and unit tests and does not change the runner's startup registration.
 
 ## Next steps
 
