@@ -1,0 +1,5 @@
+# The native tray ships as a single portable exe. Link the C runtime
+# statically so it does not depend on vcruntime140.dll being installed
+# (#26).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
