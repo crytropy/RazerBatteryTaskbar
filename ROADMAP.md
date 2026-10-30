@@ -22,17 +22,25 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 6 | Add a device event system | Complete |
 | 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Complete — native HID feature reports chosen (ADR-0001); hot-plug, sleep/wake and 16.5 h polling verified on hardware; Synapse coexistence out of scope by decision |
 | 8 | Move the stable core to Rust | Core contracts migrated |
-| 9 | Build the lightweight Windows tray frontend | Tray + background worker + session poll diagnostics; long-run hardware testing pending |
-| 10 | Add persistent settings | Core/persistence + tray polling/threshold controls + primary preference + startup mode preservation complete |
+| 9 | Build the lightweight Windows tray frontend | Complete — tray + background worker + session poll diagnostics; long-run hardware testing done (see Phase 7 hardware validation) |
+| 10 | Add persistent settings | Complete — core/persistence + threshold controls + primary preference + startup mode preservation (the poll interval is fixed at 10 s since #24) |
 | 11 | Add low/critical battery notifications | Complete |
 | 12 | Add an optional integration API/IPC boundary | Read-only loopback API + explicit transport readiness implemented |
 | 13 | Add optional Seelen UI integration | Fancy Toolbar adapter scaffold complete |
 | 14 | Add automated tests and CI | Rust quality gates + labeled preview artifacts complete |
-| 15 | Package and release a stable v1.0 of the rewritten application | Planned |
+| 15 | Package and release a stable v1.0 of the rewritten application | Complete — release pipeline verified end to end with `v1.0.0-rc.1` (#10); `v1.0.0` is tagged from this version bump (#11) |
+
+## After v1.0
+
+Loose ends that do not block the v1.0 release:
+
+- **Hibernate recovery (#16).** Confirm across several nightly hibernations that the tray recovers `connected=true` / `transportHealthy=true` within 60 s of waking, then record the result in `docs/TRANSPORT.md`.
+- **Cable-only mode of the DeathAdder V3 Pro (`1532:00B6`, follow-up of #18).** The wired/wireless pairing is implemented and charging over the cable is verified with the receiver attached, but a run with the receiver unplugged (so Windows enumerates `00B6` itself) and the wireless ↔ wired hand-over have not been tested on hardware.
+- **More hardware.** The native transport targets only the DeathAdder V3 Pro; other devices in the shared database need the same validation before the Electron legacy build can be retired.
 
 ## Current architecture
 
-The Electron application remains the usable compatibility runtime while the Rust/native implementation is developed in parallel.
+The native tray is the v1.0 release. The Electron application is kept only as a legacy/compatibility build for hardware the native transport does not support yet.
 
 The Rust core contains protocol handling, the shared device database, normalized state, multi-device management, events, transport abstraction, the core service, privacy-safe frontend snapshots, a versioned integration JSON contract, persistent settings, and notification policy.
 

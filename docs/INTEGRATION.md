@@ -12,7 +12,7 @@ Example:
 {
   "schemaVersion": 2,
   "service": "RazerBatteryTaskbar",
-  "coreVersion": "0.1.0",
+  "coreVersion": "1.0.0",
   "transportName": "windows-hid",
   "transportReady": true,
   "transportHealthy": true,
