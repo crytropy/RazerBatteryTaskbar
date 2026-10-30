@@ -2,32 +2,34 @@
 
 在 Windows 系統匣顯示 Razer 無線裝置電量的小工具。
 
-這個分支正在逐步現代化。原本的 Electron/USB 版本仍然是**可正常使用的相容版**，同時平行開發一個輕量的 Rust 原生版本，並在真實硬體上驗證。
+v1.0 起的正式版是以 Rust 重寫的**原生系統匣程式**：單一免安裝 exe，已在真實硬體上驗證。原本的 Electron/USB 版本保留為 legacy／相容版，只給原生版尚未支援的硬體使用。
 
 ## 我該用哪一版？
 
-### 相容版（Compatibility build）：一般測試請用這個
+### 原生版（Native）：請用這個
 
-Electron 版是目前預期能讀到真實裝置電量的版本。
+正式版請到 GitHub Releases 下載（檔名中的 `<版本>` 為 tag 去掉開頭的 `v`）：
 
-下載最新的 Windows 自動安裝檔：
+https://github.com/crytropy/RazerBatteryTaskbar/releases
 
-https://github.com/crytropy/RazerBatteryTaskbar/releases/tag/dev-build
+每個 Release 內含：
 
-檔案：
+- `RazerBatteryTaskbar-Native-<版本>.exe`
+- `SHA256SUMS.txt`（執行檔的 SHA-256，可用 `Get-FileHash` 核對）
+- `README-NATIVE.txt`
 
-`RazerBatteryTaskbar-Windows-Setup.exe`
+標示為 Pre-release 的版本（例如 `v1.0.0-rc.1`）是發行前的預覽。`main` 分支的最新原生版會附在
+[dev-build](https://github.com/crytropy/RazerBatteryTaskbar/releases/tag/dev-build) 預先發行版中（`RazerBatteryTaskbar-Native-dev.exe`），
+另可從 **Rust Native** 工作流程的 artifact `RazerBatteryTaskbar-Native` 取得：
 
-只要 `main` 上與相容版執行環境相關的程式碼有變動，這個開發版就會自動重新建置。
+https://github.com/crytropy/RazerBatteryTaskbar/actions/workflows/rust-core.yml
 
-### 原生版（Native）：輕量系統匣程式
-
-Rust 原生系統匣已經能以輕量 Windows 系統匣程式的形式執行，包含：
+原生版是輕量的 Windows 系統匣程式，包含：
 
 - 原生系統匣圖示與選單；
 - 多裝置核心／狀態模型；
 - 持久化設定；
-- 執行期可調整的輪詢間隔；
+- 固定每 10 秒輪詢一次；
 - 低電量／嚴重低電量門檻；
 - Windows 電量通知；
 - 開機自動啟動；
@@ -48,23 +50,11 @@ Rust 原生系統匣已經能以輕量 Windows 系統匣程式的形式執行，
 
 程式會在啟動時送出一次電量查詢，之後固定每 10 秒輪詢一次（沒有選項；舊設定檔中的其他值會在啟動時改寫成 10）。接收器插著時，插拔充電線不會產生 USB 事件，所以充電狀態與圖示顏色靠這 10 秒一次的輪詢更新。舊的 `--experimental-hid-00b7` 參數仍可接受，但只是 no-op；`--placeholder-transport` 則是沒有硬體時用來測試介面的除錯選項。使用前請先閱讀 [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md)。
 
-正式版請到 GitHub Releases 下載（檔名中的 `<版本>` 為 tag 去掉開頭的 `v`）：
+### 舊版／相容版（Legacy，Electron）：僅供原生版尚未支援的硬體
 
-https://github.com/crytropy/RazerBatteryTaskbar/releases
+Electron/USB 版是舊的實作，保留給原生版尚未支援的 Razer 裝置；新安裝請一律使用上面的原生版。
 
-每個 Release 內含：
-
-- `RazerBatteryTaskbar-Native-<版本>.exe`
-- `SHA256SUMS.txt`（執行檔的 SHA-256，可用 `Get-FileHash` 核對）
-- `README-NATIVE.txt`
-
-標示為 Pre-release 的版本（例如 `v1.0.0-rc.1`）是發行前的預覽。`main` 分支的最新原生版會附在
-[dev-build](https://github.com/crytropy/RazerBatteryTaskbar/releases/tag/dev-build) 預先發行版中（`RazerBatteryTaskbar-Native-dev.exe`），
-另可從 **Rust Native** 工作流程的 artifact `RazerBatteryTaskbar-Native` 取得：
-
-https://github.com/crytropy/RazerBatteryTaskbar/actions/workflows/rust-core.yml
-
-Electron 安裝檔若出現在 Release 中，一律標示為 legacy／相容版，僅供原生版尚未支援的硬體使用。
+每個正式 Release 都會附上 Electron 安裝檔 `RazerBatteryTaskbar-Windows-Setup.exe`，並在說明中標示為 legacy／相容版。`main` 上與相容版執行環境相關的程式碼有變動時，[dev-build](https://github.com/crytropy/RazerBatteryTaskbar/releases/tag/dev-build) 預先發行版也會自動重建這個安裝檔。
 
 ### HID Probe：硬體驗證工具
 
@@ -89,9 +79,9 @@ JSON 報告不包含序號與 HID 路徑。產品 ID 在資料庫中有紀錄，
 ```text
 Razer 裝置
     │
-    ├─ Electron 相容版執行環境 ── Windows 系統匣
+    ├─ Electron 相容版（legacy）── Windows 系統匣
     │
-    └─ 原生傳輸層（硬體驗證進行中）
+    └─ 原生 HID 傳輸層（windows-hid，已實機驗證）
              │
              ▼
         Rust Core
@@ -115,7 +105,7 @@ Razer 裝置
 
 ## 本機整合 API
 
-原生預覽版提供一個唯讀的 loopback 端點：
+原生版提供一個唯讀的 loopback 端點：
 
 ```text
 http://127.0.0.1:27212/v1/status
