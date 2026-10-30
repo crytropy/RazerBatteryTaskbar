@@ -8,6 +8,10 @@ It starts with the native Windows HID battery transport by default (`windows-hid
 
 For debugging without hardware, `--placeholder-transport` starts the tray with a transport that reads nothing and reports `transportReady=false`; the status line then says `Placeholder transport (debug) — no battery data`. The retired `--experimental-hid-00b7` flag is still accepted and is a no-op.
 
+## Portable executable
+
+The release is a single `RazerBatteryTaskbar-Native-<version>.exe`. The C runtime is linked statically (`.cargo/config.toml`, `+crt-static`, #26), so it does not depend on `vcruntime140.dll` or any VC++ Redistributable; its remaining imports are Windows system DLLs. It writes nothing next to itself: settings live in `%APPDATA%\crytropy\RazerBatteryTaskbar\config\settings.json`. "Start with Windows" registers the executable's current path, so move the exe to its permanent folder before enabling it and re-enable it after moving.
+
 ## Responsibilities
 
 The native tray owns Windows/UI concerns only:

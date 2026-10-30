@@ -44,6 +44,8 @@ Rust 原生系統匣已經能以輕量 Windows 系統匣程式的形式執行，
 .\RazerBatteryTaskbar-Native-<版本>.exe
 ```
 
+原生版是**單一免安裝 exe**：C 執行階段已靜態連結（#26），不需要安裝 VC++ Redistributable，也不會在 exe 旁邊產生檔案；設定存在 `%APPDATA%\crytropy\RazerBatteryTaskbar\config\settings.json`。「Start with Windows」會記錄當下 exe 的路徑，請先把 exe 放到固定位置再勾選；移動 exe 之後要重新勾選一次。
+
 程式會在啟動時送出一次電量查詢，之後固定每 10 秒輪詢一次（沒有選項；舊設定檔中的其他值會在啟動時改寫成 10）。接收器插著時，插拔充電線不會產生 USB 事件，所以充電狀態與圖示顏色靠這 10 秒一次的輪詢更新。舊的 `--experimental-hid-00b7` 參數仍可接受，但只是 no-op；`--placeholder-transport` 則是沒有硬體時用來測試介面的除錯選項。使用前請先閱讀 [docs/NATIVE_TRAY.md](docs/NATIVE_TRAY.md)。
 
 正式版請到 GitHub Releases 下載（檔名中的 `<版本>` 為 tag 去掉開頭的 `v`）：
