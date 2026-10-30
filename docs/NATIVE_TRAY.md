@@ -78,8 +78,8 @@ Runtime verification (October 2026, DeathAdder V3 Pro, HID transport enabled wit
 
 ## Next steps
 
-1. Collect HID Probe reports from real Razer hardware while Synapse is running.
-2. Validate Synapse coexistence with the default HID transport (known limitation in ADR-0001).
+1. ~~Collect HID Probe reports while Synapse is running.~~ Dropped: Synapse coexistence is out of scope (ADR-0001, 2026-10-30).
+2. ~~Validate Synapse coexistence.~~ Dropped for the same reason; close Synapse before starting the tray.
 3. Generalise the transport beyond the DeathAdder V3 Pro (further database entries).
 4. ~~Add a primary-device selection menu when real devices are available.~~ Done in #9 (`Primary device` submenu); multi-device behaviour still needs a second supported device to verify on hardware.
 

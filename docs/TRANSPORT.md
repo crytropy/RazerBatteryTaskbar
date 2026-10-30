@@ -17,9 +17,10 @@ The transport also listens for node-usb attach/detach events and emits one debou
     from one unplug/replug is debounced for 1.5 s into a single worker rescan,
     followed by one settle rescan 3 s later because the mouse re-pairs with a
     freshly plugged receiver. Expected worst case is therefore about 2 s for an
-    unplug and about 2-5 s for a replug. Measured latency: not yet recorded;
-    the #13 hardware run (unplug ≤ 5 s, replug ≤ 5 s with battery updated)
-    is still pending and should replace this sentence with the numbers.
+    unplug and about 2-5 s for a replug. Verified on hardware on
+    2026-10-30 (#13): unplugging the receiver shows disconnected and
+    re-plugging restores the battery within the 5 s target (exact seconds
+    not recorded).
 - Windows resume requests a rescan after a short settle delay.
 - A transport-wide enumeration failure retries after 2 seconds.
 - Existing devices are only marked disconnected after three consecutive enumeration failures.
@@ -35,13 +36,13 @@ Measured on a DeathAdder V3 Pro receiver (`1532:00B7`) with the native tray in
 
 | Scenario | Result | Follow-up |
 | --- | --- | --- |
-| Receiver unplugged | `connected=false` within one 60 s poll; no false transport errors | #13 (USB detach did not force an immediate rescan; device-change rescan now implemented, latency retest pending) |
-| Receiver re-plugged | Battery restored within one poll; once faster, likely via the attach event | #13 (same retest) |
+| Receiver unplugged | Originally within one 60 s poll; since #13 the device-change rescan shows `connected=false` within the 5 s target (verified 2026-10-30) | #13 closed |
+| Receiver re-plugged | Originally within one poll; since #13 the battery is back within the 5 s target (verified 2026-10-30) | #13 closed |
 | Windows sleep → wake | Recovers automatically; the +0 s / +3 s resume refreshes fire before the mouse re-pairs, so the real update waited for the next poll (~64 s) | #12 (stagger resume refreshes) |
 | Idle mouse sleep → wake | Battery refreshed within ~13 s; last value retained while asleep (`deviceNotResponding`) | — |
 | Windows hibernate → wake | Repeatedly failed, but the tray had been started at logon without the opt-in flag and was in placeholder mode all day, so no battery read was possible regardless of hibernate. Retest after the flag is retired | #16, gated on #8 |
 | 16.5 h continuous polling | No false disconnects; battery value present throughout; 22.5 % "failures" were all `deviceNotResponding` from the idle mouse | #14 (count `deviceNotResponding` separately) |
-| Synapse coexistence | Not tested: Synapse is not installed on the test machine. Remains a known limitation | — |
+| Synapse coexistence | Not supported / not tested by decision: the maintainer has Synapse installed but never runs it. Close Synapse and its background services before starting the tray | — |
 
 ## Driver policy
 
@@ -53,9 +54,9 @@ Before the Rust migration is finalized, HIDAPI / native Windows HID access shoul
 
 ## Final transport choice
 
-The Rust core's production Windows transport is native HID feature reports through `hidapi` (windows-native backend), opening the device's HID collection once per poll. The decision, the rejected alternatives (libusb / WinUSB), the hardware evidence, and the known limitations (Synapse coexistence unverified, one device model at a time, fixed 10 s poll) are recorded in [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md). The Electron node-usb transport remains a legacy compatibility layer only.
+The Rust core's production Windows transport is native HID feature reports through `hidapi` (windows-native backend), opening the device's HID collection once per poll. The decision, the rejected alternatives (libusb / WinUSB), the hardware evidence, and the known limitations (no Synapse coexistence, one device model at a time, fixed 10 s poll) are recorded in [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md). The Electron node-usb transport remains a legacy compatibility layer only.
 
-Phase 7 is complete and #8 made the HID transport the native tray's default. Remaining items are tracked as follow-ups: #12 / #13 (reconnect latency), #16 (hibernate retest). The wired product ID of the DeathAdder V3 Pro is read since #18 (see below).
+Phase 7 is complete and #8 made the HID transport the native tray's default. Remaining items are tracked as follow-ups: #12 (wake latency on hardware), #16 (hibernate retest); #13 is verified. The wired product ID of the DeathAdder V3 Pro is read since #18 (see below).
 
 ### Two feature queries per poll
 
@@ -93,7 +94,7 @@ Phase 7 is complete when:
 1. USB transport is replaceable behind a stable boundary. ✅
 2. Attach/detach and Windows resume trigger fast reconnects. ✅ Verified on hardware (#4); latency improvements tracked in #12 and #13.
 3. Temporary enumeration failures do not immediately erase state. ✅ Verified over a 16.5 h run (#5).
-4. Real hardware testing confirms behavior with and without Razer Synapse. ⚠️ Without Synapse: verified (#4, #5). With Synapse: not tested, recorded as a known limitation.
+4. Real hardware testing confirms behavior with and without Razer Synapse. ⚠️ Without Synapse: verified (#4, #5, #13). With Synapse: out of scope by decision (2026-10-30); the tray documents that Synapse must be closed.
 5. A final transport choice for the Rust core is documented. ✅ [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md) (#7).
 
 

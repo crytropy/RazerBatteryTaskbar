@@ -20,7 +20,7 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 | 4 | Move supported hardware into a maintainable device database | Complete |
 | 5 | Add multi-device support | Complete |
 | 6 | Add a device event system | Complete |
-| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Complete — native HID feature reports chosen (ADR-0001); hot-plug, sleep/wake and 16.5 h polling verified on hardware; Synapse coexistence recorded as a known limitation |
+| 7 | Evaluate Windows HID/HIDAPI/libusb transport and add hotplug/reconnect | Complete — native HID feature reports chosen (ADR-0001); hot-plug, sleep/wake and 16.5 h polling verified on hardware; Synapse coexistence out of scope by decision |
 | 8 | Move the stable core to Rust | Core contracts migrated |
 | 9 | Build the lightweight Windows tray frontend | Tray + background worker + session poll diagnostics; long-run hardware testing pending |
 | 10 | Add persistent settings | Core/persistence + tray polling/threshold controls + primary preference + startup mode preservation complete |
@@ -36,13 +36,13 @@ The Electron application remains the usable compatibility runtime while the Rust
 
 The Rust core contains protocol handling, the shared device database, normalized state, multi-device management, events, transport abstraction, the core service, privacy-safe frontend snapshots, a versioned integration JSON contract, persistent settings, and notification policy.
 
-The Windows HID transport (`windows-hid`) is the default startup path of the native tray (#8). The retired `--experimental-hid-00b7` flag is accepted as a no-op; `--placeholder-transport` is a debug option for runs without hardware. Synapse coexistence remains a known limitation (ADR-0001).
+The Windows HID transport (`windows-hid`) is the default startup path of the native tray (#8). The retired `--experimental-hid-00b7` flag is accepted as a no-op; `--placeholder-transport` is a debug option for runs without hardware. Running alongside Synapse is not supported (ADR-0001); close Synapse before starting the tray.
 
 The native tray shell lives in `native/razer-tray`. It owns the Windows event loop, system tray icon/menu, settings persistence integration, notification threshold controls, Windows notification adapter, per-user startup registration, single-instance protection, and a read-only loopback status API. A single background worker owns the entire Rust core and HID transport, leaving the UI thread free of device I/O. Default startup uses the native Windows HID transport; the placeholder transport is reachable only through the `--placeholder-transport` debug flag.
 
 ## Phase 7 hardware validation
 
-Hot-plug, Windows sleep/wake, idle-mouse wake and a 16.5 h polling run were verified on a DeathAdder V3 Pro receiver in October 2026 (issues #4, #5). The final transport choice is recorded in `docs/adr/0001-windows-hid-feature-reports-as-rust-core-transport.md`. Synapse coexistence is untested and recorded as a known limitation; hibernate recovery is retested after the opt-in flag is retired (#16, after #8). See `docs/TESTING.md` and `docs/TRANSPORT.md`.
+Hot-plug, Windows sleep/wake, idle-mouse wake and a 16.5 h polling run were verified on a DeathAdder V3 Pro receiver in October 2026 (issues #4, #5). The final transport choice is recorded in `docs/adr/0001-windows-hid-feature-reports-as-rust-core-transport.md`. Receiver unplug/replug via device-change notifications was verified on 2026-10-30 (#13). Synapse coexistence is out of scope by decision. Hibernate recovery is being confirmed across the maintainer's nightly hibernations (#16). See `docs/TESTING.md` and `docs/TRANSPORT.md`.
 
 ## Native migration rule
 
