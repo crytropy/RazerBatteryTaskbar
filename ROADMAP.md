@@ -34,7 +34,6 @@ The project is being modernized incrementally. Compatibility and a clean core ar
 
 Loose ends that do not block the v1.0 release:
 
-- **Hibernate recovery (#16).** Confirm across several nightly hibernations that the tray recovers `connected=true` / `transportHealthy=true` within 60 s of waking, then record the result in `docs/TRANSPORT.md`.
 - **Cable-only mode of the DeathAdder V3 Pro (`1532:00B6`, follow-up of #18).** The wired/wireless pairing is implemented and charging over the cable is verified with the receiver attached, but a run with the receiver unplugged (so Windows enumerates `00B6` itself) and the wireless ↔ wired hand-over have not been tested on hardware.
 - **More hardware.** The native transport targets only the DeathAdder V3 Pro; other devices in the shared database need the same validation before the Electron legacy build can be retired.
 
@@ -50,7 +49,7 @@ The native tray shell lives in `native/razer-tray`. It owns the Windows event lo
 
 ## Phase 7 hardware validation
 
-Hot-plug, Windows sleep/wake, idle-mouse wake and a 16.5 h polling run were verified on a DeathAdder V3 Pro receiver in October 2026 (issues #4, #5). The final transport choice is recorded in `docs/adr/0001-windows-hid-feature-reports-as-rust-core-transport.md`. Receiver unplug/replug via device-change notifications was verified on 2026-10-30 (#13). Synapse coexistence is out of scope by decision. Hibernate recovery is being confirmed across the maintainer's nightly hibernations (#16). See `docs/TESTING.md` and `docs/TRANSPORT.md`.
+Hot-plug, Windows sleep/wake, idle-mouse wake and a 16.5 h polling run were verified on a DeathAdder V3 Pro receiver in October 2026 (issues #4, #5). The final transport choice is recorded in `docs/adr/0001-windows-hid-feature-reports-as-rust-core-transport.md`. Receiver unplug/replug via device-change notifications was verified on 2026-10-30 (#13). Synapse coexistence is out of scope by decision. Hibernate recovery was verified on three consecutive nightly hibernations, 2026-10-31 to 2026-11-02 (#16). See `docs/TESTING.md` and `docs/TRANSPORT.md`.
 
 ## Native migration rule
 
