@@ -40,7 +40,7 @@ Measured on a DeathAdder V3 Pro receiver (`1532:00B7`) with the native tray in
 | Receiver re-plugged | Originally within one poll; since #13 the battery is back within the 5 s target (verified 2026-10-30) | #13 closed |
 | Windows sleep → wake | Recovers automatically; the +0 s / +3 s resume refreshes fire before the mouse re-pairs, so the real update waited for the next poll (~64 s) | #12 (stagger resume refreshes) |
 | Idle mouse sleep → wake | Battery refreshed within ~13 s; last value retained while asleep (`deviceNotResponding`) | — |
-| Windows hibernate → wake | Repeatedly failed, but the tray had been started at logon without the opt-in flag and was in placeholder mode all day, so no battery read was possible regardless of hibernate. Retest after the flag is retired | #16, gated on #8 |
+| Windows hibernate → wake | Recovers automatically on three consecutive nightly hibernations (6.5–19 h, 2026-10-31 to 2026-11-02) with the tray kept running, no flag: first battery read 21 s after waking (measured with the 5 s log), ≤ 55 s on the other two, zero transport failures. The +3 s / +10 s resume refreshes return `deviceNotResponding` while the receiver re-pairs and the +20 s one reads the battery. An earlier failure was the tray running in placeholder mode without the opt-in flag | #16 closed |
 | 16.5 h continuous polling | No false disconnects; battery value present throughout; 22.5 % "failures" were all `deviceNotResponding` from the idle mouse | #14 (count `deviceNotResponding` separately) |
 | Synapse coexistence | Not supported / not tested by decision: the maintainer has Synapse installed but never runs it. Close Synapse and its background services before starting the tray | — |
 
@@ -56,7 +56,7 @@ Before the Rust migration is finalized, HIDAPI / native Windows HID access shoul
 
 The Rust core's production Windows transport is native HID feature reports through `hidapi` (windows-native backend), opening the device's HID collection once per poll. The decision, the rejected alternatives (libusb / WinUSB), the hardware evidence, and the known limitations (no Synapse coexistence, one device model at a time, fixed 10 s poll) are recorded in [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md). The Electron node-usb transport remains a legacy compatibility layer only.
 
-Phase 7 is complete and #8 made the HID transport the native tray's default. Remaining items are tracked as follow-ups: #12 (wake latency on hardware), #16 (hibernate retest); #13 is verified. The wired product ID of the DeathAdder V3 Pro is read since #18 (see below).
+Phase 7 is complete and #8 made the HID transport the native tray's default. Remaining items are tracked as follow-ups: #12 (wake latency on hardware); #13 and #16 (hibernate recovery) are verified. The wired product ID of the DeathAdder V3 Pro is read since #18 (see below).
 
 ### Two feature queries per poll
 
