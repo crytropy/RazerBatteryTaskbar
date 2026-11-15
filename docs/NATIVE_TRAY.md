@@ -151,10 +151,13 @@ The GUI thread never calls `CoreService::refresh()` or touches HID.
 
 The worker:
 
-- reads immediately when started and subsequently on its configured interval;
-- accepts manual Refresh and interval changes as commands, without creating
-  concurrent HID readers;
-- coalesces queued Refresh requests before a read;
+- owns the refresh schedule (`native/razer-tray/src/refresh_schedule.rs`):
+  it reads immediately when started, then on the regular poll, post-resume
+  recovery and device-change rescans, waiting for the schedule's next
+  deadline rather than a fixed interval;
+- accepts manual Refresh, Windows wake and device-change commands, without
+  creating concurrent HID readers;
+- coalesces triggers that fall due together into one read;
 - sends frontend-safe snapshots and notification requests to the
   `winit` event loop for all tray, toast and local API updates;
 - stops when the tray exits, without blocking the UI on a slow HID handle;
@@ -265,30 +268,35 @@ refreshes.
 
 Real-device testing showed that the DeathAdder V3 Pro and its receiver need
 more than three seconds to re-pair after a wake, so refreshes fired too
-early only returned `deviceNotResponding`. Recovery refreshes are therefore
-staggered at **+3 s, +10 s and +20 s** after the resume event. The first
-refresh that produces a real battery read (a successful transport read with
+early only returned `deviceNotResponding`. Post-resume recovery therefore
+reads at **+3 s, +10 s and +20 s** after the resume event. The first
+read that is a fresh battery read (a successful transport read with
 the primary device connected and reporting a battery level) cancels the
-remaining attempts. Only snapshots backed by a transport read made after the
-resume count: a snapshot republished without a read, such as the one that
-follows a `Primary device` switch, neither ends nor exhausts the recovery.
+remaining attempts, whichever trigger made that read (a recovery attempt, a
+device-change rescan or a manual refresh). The background worker owns the
+whole refresh schedule (`native/razer-tray/src/refresh_schedule.rs`), so it
+knows whether each read was a fresh battery read: a snapshot republished
+without a read, such as the one that follows a `Primary device` switch, is
+not a read and neither ends nor exhausts the recovery.
 If all three fail, the tray gives up on recovery and the
 ordinary scheduled polling takes over unchanged; the device stays
 `connected` and the last known battery level is retained, exactly as for
 any other `deviceNotResponding` failure. A second wake that arrives after
 the four-second window replaces the pending set rather than adding to it.
 
-The power callback and the timer thread never open an HID handle and never
-block the UI event loop; they only post events to it, and the refreshes run
-on the background battery worker like every other read. If power
-notification registration fails, normal scheduled polling remains available
-as a fallback. The fixed 10 s polling interval remains
-unchanged for ordinary polling; recovery refreshes are only sent after an
-actual Windows resume event.
+The power callback never opens an HID handle and never blocks; it only tells
+the background battery worker that Windows woke, and the worker runs the
+recovery reads like every other read. If power notification registration
+fails, normal scheduled polling remains available as a fallback. The fixed
+10 s polling interval is counted from the last read: recovery reads, rescans
+and manual refreshes restart it, while commands that do not read
+(notification settings, a `Primary device` switch) leave it on time.
 
-The scheduler is covered by fake-transport unit tests for both paths
-(second attempt succeeds; all attempts fail). The end-to-end timing still
-requires real-device testing on Windows.
+The refresh schedule is unit tested with simulated time (recovery offsets,
+stop at the first fresh read, exhaustion, a second wake, overlaps with
+rescans), and the worker with fake-transport tests that run the real thread
+on millisecond timings. The end-to-end timing was verified on hardware
+(#12, #16).
 
 
 ## USB device-change notifications
@@ -301,18 +309,17 @@ needs no window and is delivered on a system thread.
 
 The callback only looks at the vendor ID in the interface path, so plugging
 in an unrelated keyboard does not trigger a rescan. One unplug or replug
-produces several interface arrival/removal events; a pure debounce state
-machine collapses them into a single refresh request 1.5 s after the last
-event, plus one settle refresh 3 s later so the mouse has time to re-pair
-with a replugged receiver. The refresh is posted to the `winit` event loop as
-`UserEvent::DeviceChange` and from there to the background worker, which
-coalesces it with any pending poll. No HID handle is ever opened on the
-callback, timer or UI thread.
+produces several interface arrival/removal events. The callback forwards each
+one straight to the background worker, whose refresh schedule collapses the
+burst into a single read 1.5 s after the last event, plus one follow-up read
+3 s later so the mouse has time to re-pair with a replugged receiver. Reads
+that fall due together, such as a rescan and a recovery attempt, cost one
+read. No HID handle is ever opened on the callback or UI thread.
 
 If registration fails the tray logs the error and normal scheduled polling
-remains the fallback. The debounce logic and the worker coalescing are unit
-tested without hardware; the ≤ 5 s unplug / replug latency still needs a
-real-device run (issue #13).
+remains the fallback. The rescan rules and the worker coalescing are unit
+tested without hardware; the ≤ 5 s unplug / replug latency was verified on
+hardware (issue #13).
 
 ## HID read errors versus actual receiver disconnection
 
