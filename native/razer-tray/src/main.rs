@@ -7,11 +7,12 @@ mod polling;
 #[cfg(windows)]
 mod power_events;
 mod primary_device_menu;
-mod resume_recovery;
+mod refresh_schedule;
 mod settings_menu;
 mod startup;
 
 use std::error::Error;
+use std::sync::Arc;
 use std::time::Duration;
 
 use api::SharedIntegrationState;
@@ -31,7 +32,7 @@ use razer_core::state::DeviceReading;
 use razer_core::transport::{BatteryTransport, TransportError};
 #[cfg(windows)]
 use razer_core::windows_hid::WindowsHidTransport;
-use resume_recovery::{RecoveryOutcome, RecoveryTick, ResumeRecovery};
+use refresh_schedule::ScheduleConfig;
 use settings_menu::{POLL_INTERVAL_SECONDS, SettingsMenu};
 use single_instance::SingleInstance;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
@@ -47,12 +48,6 @@ const INSTANCE_NAME: &str = "RazerBatteryTaskbar.Native.Tray";
 enum UserEvent {
     Menu(MenuEvent),
     Core(CoreUpdate),
-    /// Windows resumed; the payload is the recovery generation for this wake.
-    PowerResume(u64),
-    /// A scheduled post-resume recovery refresh is due.
-    RecoveryTick(RecoveryTick),
-    /// A debounced USB/HID device arrival or removal asks for a rescan.
-    DeviceChange,
 }
 
 struct PlaceholderTransport;
@@ -187,12 +182,11 @@ fn normalize_poll_interval(settings: &mut AppSettings) -> bool {
 }
 
 struct TrayApplication {
-    worker: CoreWorker,
+    worker: Arc<CoreWorker>,
     settings_store: Option<SettingsStore>,
     settings: AppSettings,
     integration_state: SharedIntegrationState,
     last_snapshot: Option<FrontendSnapshot>,
-    resume_recovery: ResumeRecovery,
     tray: Option<TrayIcon>,
     status_item: Option<MenuItem>,
     primary_device_menu: Option<PrimaryDeviceMenu>,
@@ -206,7 +200,7 @@ impl TrayApplication {
         settings_store: Option<SettingsStore>,
         settings: AppSettings,
         integration_state: SharedIntegrationState,
-        worker: CoreWorker,
+        worker: Arc<CoreWorker>,
     ) -> Self {
         Self {
             worker,
@@ -214,7 +208,6 @@ impl TrayApplication {
             settings,
             integration_state,
             last_snapshot: None,
-            resume_recovery: ResumeRecovery::default(),
             tray: None,
             status_item: None,
             primary_device_menu: None,
@@ -474,19 +467,7 @@ impl ApplicationHandler<UserEvent> for TrayApplication {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Menu(event) => self.handle_menu(event_loop, event),
-            UserEvent::Core(update) => {
-                if self.resume_recovery.on_update(&update.snapshot) == RecoveryOutcome::Exhausted {
-                    eprintln!("post-resume recovery refreshes failed; regular polling continues");
-                }
-                self.apply_core_update(update);
-            }
-            UserEvent::PowerResume(generation) => self.resume_recovery.on_resume(generation),
-            UserEvent::RecoveryTick(tick) => {
-                if self.resume_recovery.on_tick(tick) {
-                    self.refresh();
-                }
-            }
-            UserEvent::DeviceChange => self.refresh(),
+            UserEvent::Core(update) => self.apply_core_update(update),
         }
     }
 
@@ -780,22 +761,23 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
 
+    let update_proxy = event_loop.create_proxy();
+    let worker = Arc::new(CoreWorker::start(
+        transport,
+        ScheduleConfig::tray(initial_poll_interval),
+        settings.notifications.clone(),
+        settings.primary_device.clone(),
+        move |update| update_proxy.send_event(UserEvent::Core(update)).is_ok(),
+    ));
+
     // Windows sends an automatic resume event, often followed by a second
-    // user-resume event. The power callback deduplicates the pair. The
-    // receiver needs several seconds to re-pair with the mouse, so recovery
-    // refreshes are staggered (see `resume_recovery`) and stop at the first
-    // real battery read.
+    // user-resume event; the power callback deduplicates the pair. The worker
+    // runs post-resume recovery from there (see `refresh_schedule`).
     #[cfg(windows)]
     let _power_notifications = {
-        let resume_proxy = event_loop.create_proxy();
+        let worker = Arc::clone(&worker);
         match PowerNotifications::register(move || {
-            let generation = resume_recovery::next_generation();
-            let _ = resume_proxy.send_event(UserEvent::PowerResume(generation));
-
-            let tick_proxy = resume_proxy.clone();
-            resume_recovery::spawn_ticks(generation, move |tick| {
-                let _ = tick_proxy.send_event(UserEvent::RecoveryTick(tick));
-            });
+            worker.resumed();
         }) {
             Ok(registration) => Some(registration),
             Err(error) => {
@@ -805,13 +787,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    // Unplugging or replugging the receiver produces a burst of HID interface
-    // notifications. The device-change module debounces them into rescans.
+    // Unplugging or replugging the receiver produces a burst of Razer HID
+    // interface notifications; the worker turns it into a device-change rescan.
     #[cfg(windows)]
     let _device_notifications = {
-        let rescan_proxy = event_loop.create_proxy();
+        let worker = Arc::clone(&worker);
         match DeviceChangeNotifications::register(move || {
-            let _ = rescan_proxy.send_event(UserEvent::DeviceChange);
+            worker.device_changed();
         }) {
             Ok(registration) => Some(registration),
             Err(error) => {
@@ -825,15 +807,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     MenuEvent::set_event_handler(Some(move |event| {
         let _ = menu_proxy.send_event(UserEvent::Menu(event));
     }));
-
-    let update_proxy = event_loop.create_proxy();
-    let worker = CoreWorker::start(
-        transport,
-        initial_poll_interval,
-        settings.notifications.clone(),
-        settings.primary_device.clone(),
-        move |update| update_proxy.send_event(UserEvent::Core(update)).is_ok(),
-    );
 
     let mut application = TrayApplication::new(settings_store, settings, integration_state, worker);
     event_loop.run_app(&mut application)?;

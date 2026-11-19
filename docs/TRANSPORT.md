@@ -14,14 +14,16 @@ The transport also listens for node-usb attach/detach events and emits one debou
   - Native tray: a cfgmgr32 device-interface notification
     (`CM_Register_Notification`, `GUID_DEVINTERFACE_HID`) filtered to Razer
     interfaces (`VID_1532` in the device path). The burst of interface events
-    from one unplug/replug is debounced for 1.5 s into a single worker rescan,
-    followed by one settle rescan 3 s later because the mouse re-pairs with a
-    freshly plugged receiver. Expected worst case is therefore about 2 s for an
+    from one unplug/replug settles for 1.5 s into a single device-change
+    rescan, followed by one follow-up read 3 s later because the mouse
+    re-pairs with a freshly plugged receiver. Expected worst case is therefore about 2 s for an
     unplug and about 2-5 s for a replug. Verified on hardware on
     2026-10-30 (#13): unplugging the receiver shows disconnected and
     re-plugging restores the battery within the 5 s target (exact seconds
     not recorded).
-- Windows resume requests a rescan after a short settle delay.
+- Native tray: Windows resume starts post-resume recovery, which reads at
+  +3 s, +10 s and +20 s and stops at the first fresh battery read. Both this
+  and the device-change rescan are part of the worker's refresh schedule.
 - A transport-wide enumeration failure retries after 2 seconds.
 - Existing devices are only marked disconnected after three consecutive enumeration failures.
 - A normal successful scan that returns no device still disconnects missing devices immediately.
@@ -38,9 +40,9 @@ Measured on a DeathAdder V3 Pro receiver (`1532:00B7`) with the native tray in
 | --- | --- | --- |
 | Receiver unplugged | Originally within one 60 s poll; since #13 the device-change rescan shows `connected=false` within the 5 s target (verified 2026-10-30) | #13 closed |
 | Receiver re-plugged | Originally within one poll; since #13 the battery is back within the 5 s target (verified 2026-10-30) | #13 closed |
-| Windows sleep → wake | Recovers automatically. Originally the +0 s / +3 s resume refreshes fired before the mouse re-paired, so the real update waited for the next poll (~64 s). Since #12 the resume refreshes run at +3 s / +10 s / +20 s; on the logged hibernate run of #16, which takes the same resume path, the first battery read came 21 s after waking. Plain sleep was not re-measured separately | #12 closed |
+| Windows sleep → wake | Recovers automatically. Originally the +0 s / +3 s post-resume reads fired before the mouse re-paired, so the real update waited for the next poll (~64 s). Since #12 the post-resume recovery reads run at +3 s / +10 s / +20 s; on the logged hibernate run of #16, which takes the same resume path, the first battery read came 21 s after waking. Plain sleep was not re-measured separately | #12 closed |
 | Idle mouse sleep → wake | Battery refreshed within ~13 s; last value retained while asleep (`deviceNotResponding`) | — |
-| Windows hibernate → wake | Recovers automatically on three consecutive nightly hibernations (6.5–19 h, 2026-10-31 to 2026-11-02) with the tray kept running, no flag: first battery read 21 s after waking (measured with the 5 s log), ≤ 55 s on the other two, zero transport failures. The +3 s / +10 s resume refreshes return `deviceNotResponding` while the receiver re-pairs and the +20 s one reads the battery. An earlier failure was the tray running in placeholder mode without the opt-in flag | #16 closed |
+| Windows hibernate → wake | Recovers automatically on three consecutive nightly hibernations (6.5–19 h, 2026-10-31 to 2026-11-02) with the tray kept running, no flag: first battery read 21 s after waking (measured with the 5 s log), ≤ 55 s on the other two, zero transport failures. The +3 s / +10 s post-resume recovery reads return `deviceNotResponding` while the receiver re-pairs and the +20 s one reads the battery. An earlier failure was the tray running in placeholder mode without the opt-in flag | #16 closed |
 | 16.5 h continuous polling | No false disconnects; battery value present throughout; 22.5 % "failures" were all `deviceNotResponding` from the idle mouse | #14 (count `deviceNotResponding` separately) |
 | Synapse coexistence | Not supported / not tested by decision: the maintainer has Synapse installed but never runs it. Close Synapse and its background services before starting the tray | — |
 
@@ -56,7 +58,7 @@ Before the Rust migration is finalized, HIDAPI / native Windows HID access shoul
 
 The Rust core's production Windows transport is native HID feature reports through `hidapi` (windows-native backend), opening the device's HID collection once per poll. The decision, the rejected alternatives (libusb / WinUSB), the hardware evidence, and the known limitations (no Synapse coexistence, one device model at a time, fixed 10 s poll) are recorded in [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md). The Electron node-usb transport remains a legacy compatibility layer only.
 
-Phase 7 is complete and #8 made the HID transport the native tray's default. Its follow-ups are closed: #12 (staggered resume refreshes), #13 (device-change rescan) and #16 (hibernate recovery) are verified on hardware. The wired product ID of the DeathAdder V3 Pro is read since #18 (see below).
+Phase 7 is complete and #8 made the HID transport the native tray's default. Its follow-ups are closed: #12 (staggered post-resume recovery), #13 (device-change rescan) and #16 (hibernate recovery) are verified on hardware. The wired product ID of the DeathAdder V3 Pro is read since #18 (see below).
 
 ### Two feature queries per poll
 
@@ -92,7 +94,7 @@ If the wired twin exposes the Razer protocol on a different collection than the 
 Phase 7 is complete when:
 
 1. USB transport is replaceable behind a stable boundary. ✅
-2. Attach/detach and Windows resume trigger fast reconnects. ✅ Verified on hardware (#4); latency improvements landed in #12 (staggered resume refreshes) and #13 (device-change rescan).
+2. Attach/detach and Windows resume trigger fast reconnects. ✅ Verified on hardware (#4); latency improvements landed in #12 (staggered post-resume recovery) and #13 (device-change rescan).
 3. Temporary enumeration failures do not immediately erase state. ✅ Verified over a 16.5 h run (#5).
 4. Real hardware testing confirms behavior with and without Razer Synapse. ⚠️ Without Synapse: verified (#4, #5, #13). With Synapse: out of scope by decision (2026-10-30); the tray documents that Synapse must be closed.
 5. A final transport choice for the Rust core is documented. ✅ [ADR-0001](adr/0001-windows-hid-feature-reports-as-rust-core-transport.md) (#7).
